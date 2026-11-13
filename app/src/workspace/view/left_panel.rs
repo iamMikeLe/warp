@@ -81,6 +81,7 @@ struct MouseStateHandles {
     conversation_list_view_button: MouseStateHandle,
     global_search_button: MouseStateHandle,
     warp_drive_button: MouseStateHandle,
+    git_graph_button: MouseStateHandle,
     sign_in_button: MouseStateHandle,
 }
 
@@ -708,6 +709,20 @@ impl LeftPanelView {
                     tooltip_keybinding_names,
                 }
             }
+        }
+    }
+
+    /// Returns the hover/click state for a toolbelt button. Looked up by action rather
+    /// than by position, so the right state follows each button when some tabs are hidden.
+    fn toolbelt_mouse_state(&self, action: &LeftPanelAction) -> MouseStateHandle {
+        let handles = &self.mouse_state_handles;
+        match action {
+            LeftPanelAction::ProjectExplorer => handles.project_explorer_button.clone(),
+            LeftPanelAction::GlobalSearch { .. } => handles.global_search_button.clone(),
+            LeftPanelAction::WarpDrive => handles.warp_drive_button.clone(),
+            LeftPanelAction::ConversationListView => handles.conversation_list_view_button.clone(),
+            LeftPanelAction::GitGraph => handles.git_graph_button.clone(),
+            LeftPanelAction::SignIn => handles.sign_in_button.clone(),
         }
     }
 
@@ -1415,15 +1430,6 @@ impl View for LeftPanelView {
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
         let appearance = Appearance::as_ref(app);
 
-        let mouse_state_handles = vec![
-            self.mouse_state_handles.project_explorer_button.clone(),
-            self.mouse_state_handles
-                .conversation_list_view_button
-                .clone(),
-            self.mouse_state_handles.global_search_button.clone(),
-            self.mouse_state_handles.warp_drive_button.clone(),
-        ];
-
         // If there is only one button in the toolbelt row,
         // there is no need to show it as it's a bit redundant.
         let toolbelt_button_row = if self.toolbelt_buttons.len() > 1 {
@@ -1431,11 +1437,10 @@ impl View for LeftPanelView {
                 Flex::row()
                     .with_cross_axis_alignment(CrossAxisAlignment::Center)
                     .with_spacing(4.0)
-                    .with_children(self.toolbelt_buttons.iter().zip(&mouse_state_handles).map(
-                        |(button_config, mouse_state)| {
-                            Self::render_button(button_config, mouse_state.clone(), appearance)
-                        },
-                    ))
+                    .with_children(self.toolbelt_buttons.iter().map(|button_config| {
+                        let mouse_state = self.toolbelt_mouse_state(&button_config.action);
+                        Self::render_button(button_config, mouse_state, appearance)
+                    }))
                     .with_main_axis_size(MainAxisSize::Min)
                     .finish(),
             )
