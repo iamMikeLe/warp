@@ -1,0 +1,74 @@
+# Warp + Git Graph
+
+A personal build of [Warp](https://github.com/warpdotdev/warp) with a **Git Graph** panel: a
+GitKraken-style commit history view inside the terminal, so browsing history, branches, tags,
+and stashes doesn't mean switching to another app. I use it daily alongside AI coding agents,
+where many branches, worktrees, and stashes pile up quickly.
+
+> This is an unofficial fork, not affiliated with Warp. It tracks upstream `master` and is
+> rebuilt from source.
+
+## Features
+
+- **Commit graph:** a lane-based DAG of the repository's history, with merge and fork
+  connectors and badges for HEAD, local and remote branches, tags, and stashes.
+- **Commit details:** message, author, committer, timestamps, and changed files with
+  `+/-` counts; clicking a file opens a read-only diff.
+- **Navigation:** a repository picker for folders with several repos, a branch filter,
+  paging with "load more", and auto-refresh when the repository changes.
+- **Git operations (right-click):** checkout, create/rename/delete branches and tags,
+  merge, rebase, reset (soft/mixed/hard), cherry-pick, revert, drop, push/pull, stash
+  apply/pop/drop, and archive. Every mutating action asks for confirmation first.
+- **Settings → Git:** show or hide the panel and stashes, and set how deep to scan for
+  repositories.
+
+## Credits and what I've added
+
+The Git Graph panel was originally written by [@0xBB2B](https://github.com/0xBB2B)
+([warpdotdev/warp#12043](https://github.com/warpdotdev/warp/pull/12043), maintained at
+[0xBB2B/warp](https://github.com/0xBB2B/warp)). The upstream PR was closed without review, so
+I picked it up from there. My work on top of it:
+
+- **Brought it up to date with upstream Warp:** merged several months of upstream changes and
+  adapted the feature to Warp's reorganised settings pages and new repository-watcher API.
+- **Fixed a missing toolbar button:** the Git Graph tab silently disappeared when all five
+  tool panels were enabled.
+- **Hardened git argument handling:** the git operations now pass branch and tag names as
+  fully qualified refs, use `--end-of-options`, and validate names before running git.
+- **Fixed unreadable graphs on repositories with many stashes:** stashes now attach to their
+  base commit and respect the branch filter instead of opening lanes that never close (one
+  real-world repo needed 168 lanes before the fix), and the lane area is capped so commit
+  text always stays visible. Added a "Show stashes" setting.
+- **Next:** a GitKraken-style column layout (Branch/Tag | Graph | Commit message).
+
+## Building and running (macOS)
+
+Prerequisites: Xcode, Rust via `rustup` (the toolchain version is pinned in
+`rust-toolchain.toml`), and:
+
+```sh
+brew install protobuf pkgconf
+cargo install --locked cargo-bundle@0.11.0
+```
+
+Build and launch:
+
+```sh
+WARP_SKIP_COMMON_SKILLS_INSTALL=1 ./script/run --features git_graph,open_directory_in_external_editor
+```
+
+This opens **WarpOss**, which keeps its own settings in `~/.warp-oss` and doesn't touch an
+installed Warp. Open the Git Graph from the **Tools panel**, using the tool icon at the top
+left (or the left panel button when vertical tabs are off), then the branch icon.
+
+## Staying up to date with upstream
+
+```sh
+git fetch upstream
+git merge upstream/master   # merge, don't rebase: the branch carries the original fork's merge history
+```
+
+## License
+
+Same as Warp: AGPL-3.0 (with MIT-licensed parts); see [LICENSE-AGPL](LICENSE-AGPL) and
+[LICENSE-MIT](LICENSE-MIT).
