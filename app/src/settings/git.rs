@@ -18,6 +18,17 @@ define_settings_group!(GitSettings, settings: [
         toml_path: "git.show_graph_panel",
         description: "Whether the Git Graph panel is shown in the tools panel.",
     },
+    // Whether stashes appear in the Git Graph, each attached directly above its base commit.
+    show_git_graph_stashes: ShowGitGraphStashes {
+        type: bool,
+        default: true,
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
+        private: false,
+        toml_path: "git.show_stashes",
+        description: "Whether stashes are shown in the Git Graph, above the commit they were made on.",
+    },
     // How many directory levels below the working directory the Git Graph probes for repositories:
     // 0 = only the repository the working directory itself belongs to; 1 (default) = also check
     // whether each first-level subdirectory is a repository; 2/3 descend further. Useful when a

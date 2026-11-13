@@ -8,6 +8,7 @@
 //! and invoke the parser.
 
 #[cfg(not(target_family = "wasm"))]
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[cfg(not(target_family = "wasm"))]
@@ -295,31 +296,32 @@ fn parse_stash_record(record: &str) -> Option<CommitNode> {
     })
 }
 
-/// Merge stash nodes into a commit list (both already newest→oldest) by author
-/// time descending, so each stash appears near where it was created. Stable on
-/// ties: a stash sorts ahead of a commit with the same time.
-pub(crate) fn merge_stashes(commits: Vec<CommitNode>, stashes: Vec<CommitNode>) -> Vec<CommitNode> {
+/// Places each stash directly above its base commit (as GitKraken does), so its
+/// lane opens and closes on adjacent rows. A stash whose base commit isn't in
+/// `commits` — filtered out by the branch selection, or not loaded yet — is
+/// left out; otherwise its lane would wait for a parent that never arrives and
+/// run to the bottom of the graph. Several stashes on the same base keep their
+/// `git stash list` order (newest first).
+///
+/// `commits` must be real commits only (no stash nodes), newest→oldest.
+pub(crate) fn place_stashes(commits: Vec<CommitNode>, stashes: &[CommitNode]) -> Vec<CommitNode> {
     if stashes.is_empty() {
         return commits;
     }
-    let mut merged = Vec::with_capacity(commits.len() + stashes.len());
-    let mut commits = commits.into_iter().peekable();
-    let mut stashes = stashes.into_iter().peekable();
-    loop {
-        match (stashes.peek(), commits.peek()) {
-            (Some(s), Some(c)) => {
-                if s.author_time >= c.author_time {
-                    merged.push(stashes.next().unwrap());
-                } else {
-                    merged.push(commits.next().unwrap());
-                }
-            }
-            (Some(_), None) => merged.push(stashes.next().unwrap()),
-            (None, Some(_)) => merged.push(commits.next().unwrap()),
-            (None, None) => break,
+    let mut by_base: HashMap<&str, Vec<&CommitNode>> = HashMap::new();
+    for stash in stashes {
+        if let Some(base) = stash.parents.first() {
+            by_base.entry(base.as_str()).or_default().push(stash);
         }
     }
-    merged
+    let mut placed = Vec::with_capacity(commits.len() + stashes.len());
+    for commit in commits {
+        if let Some(on_this_base) = by_base.remove(commit.hash.as_str()) {
+            placed.extend(on_this_base.into_iter().cloned());
+        }
+        placed.push(commit);
+    }
+    placed
 }
 
 /// Loads the repo's stashes as synthetic commit nodes (see [`parse_stash_list`]).

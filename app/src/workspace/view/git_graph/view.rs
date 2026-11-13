@@ -351,6 +351,9 @@ pub(crate) struct GitGraphView {
     /// Loaded commits (wrapped in `Arc` for zero-copy move into the
     /// [`UniformList`] build closure).
     commits: Arc<Vec<CommitNode>>,
+    /// Every stash in the repo, kept so each load-more page can attach the
+    /// stashes whose base commit it brings in (see [`super::data::place_stashes`]).
+    stashes: Arc<Vec<CommitNode>>,
     /// Per-row lane layout computed by [`build_layout`], one-to-one with
     /// `commits`.
     layout: Arc<GraphLayout>,
@@ -590,10 +593,16 @@ impl GitGraphView {
         // anchor (so the panel reflects a depth change made in settings
         // immediately).
         ctx.subscribe_to_model(&GitSettings::handle(ctx), |me, _, event, ctx| {
-            if matches!(event, GitSettingsChangedEvent::GitGraphScanDepth { .. }) {
-                // Changing the scan depth only re-discovers repos; keep the
-                // currently selected repo instead of following the anchor.
-                me.discover(false, ctx);
+            match event {
+                GitSettingsChangedEvent::GitGraphScanDepth { .. } => {
+                    // Changing the scan depth only re-discovers repos; keep the
+                    // currently selected repo instead of following the anchor.
+                    me.discover(false, ctx);
+                }
+                GitSettingsChangedEvent::ShowGitGraphStashes { .. } => {
+                    me.reload(LoadAnchor::Preserve, ctx);
+                }
+                _ => {}
             }
         });
 
@@ -666,6 +675,7 @@ impl GitGraphView {
             // by 1/3 of the panel height when the overlay opens.
             branch_popup_max_height: 280.,
             commits: Arc::new(Vec::new()),
+            stashes: Arc::new(Vec::new()),
             layout: Arc::new(empty_layout()),
             state: LoadState::NoRepo,
             row_mouse_states: Arc::new(Vec::new()),
@@ -1348,6 +1358,7 @@ impl GitGraphView {
         {
             let expected = dir.clone();
             let filter = self.branch_filter();
+            let show_stashes = *GitSettings::as_ref(ctx).show_git_graph_stashes;
             ctx.spawn(
                 async move {
                     let commits = super::data::load_commit_graph(
@@ -1360,15 +1371,19 @@ impl GitGraphView {
                     // `has_more` is decided by the raw page size, before stashes
                     // are mixed in (they don't count toward pagination).
                     let has_more = commits.len() == COMMIT_PAGE_SIZE;
-                    // Inject stashes as graph nodes, ordered into the page by time.
-                    let stashes = super::data::load_stashes(&dir).await.unwrap_or_default();
-                    let commits = super::data::merge_stashes(commits, stashes);
+                    // Attach stashes directly above their (loaded) base commits.
+                    let stashes = if show_stashes {
+                        super::data::load_stashes(&dir).await.unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    let commits = super::data::place_stashes(commits, &stashes);
                     // Bundle the cheap status query so the uncommitted row lands
                     // together with the first page (no second flash).
                     let uncommitted = super::data::load_working_tree_status(&dir)
                         .await
                         .unwrap_or(0);
-                    Ok::<_, anyhow::Error>((commits, has_more, uncommitted))
+                    Ok::<_, anyhow::Error>((commits, stashes, has_more, uncommitted))
                 },
                 move |view, result, ctx| {
                     #[cfg(not(feature = "local_fs"))]
@@ -1378,7 +1393,7 @@ impl GitGraphView {
                         return;
                     }
                     match result {
-                        Ok((commits, has_more, uncommitted)) => {
+                        Ok((commits, stashes, has_more, uncommitted)) => {
                             // Snapshot the user's place from the outgoing list
                             // NOW — at landing time — so a selection made while
                             // this reload was in flight is what gets restored
@@ -1405,6 +1420,7 @@ impl GitGraphView {
                                     .collect(),
                             );
                             view.commits = Arc::new(commits);
+                            view.stashes = Arc::new(stashes);
                             view.state = LoadState::Loaded;
                             // Auto-refresh: restore the user's place in the new
                             // list by hash (see `auto_refresh::relocate_view`).
@@ -1516,8 +1532,18 @@ impl GitGraphView {
                     match result {
                         Ok(batch) => {
                             view.has_more = batch.len() == COMMIT_PAGE_SIZE;
-                            let mut combined = (*view.commits).clone();
-                            combined.extend(batch);
+                            // Re-place stashes over all real commits so a stash
+                            // whose base arrives in this page appears above it.
+                            // Rows already shown keep their positions: new
+                            // stashes can only attach to commits in `batch`.
+                            let mut real: Vec<CommitNode> = view
+                                .commits
+                                .iter()
+                                .filter(|c| !super::data::is_stash_node(c))
+                                .cloned()
+                                .collect();
+                            real.extend(batch);
+                            let combined = super::data::place_stashes(real, &view.stashes);
                             view.layout =
                                 Arc::new(build_layout(&combined, view.uncommitted_count > 0));
                             view.row_mouse_states = Arc::new(

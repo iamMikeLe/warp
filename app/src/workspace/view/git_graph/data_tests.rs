@@ -485,31 +485,75 @@ fn parse_stash_list_keeps_only_base_parent() {
     assert!(is_stash_node(n));
 }
 
-#[test]
-fn merge_stashes_orders_by_time_desc() {
-    let commit = |hash: &str, t: i64| CommitNode {
+fn node(hash: &str, parents: &[&str]) -> CommitNode {
+    CommitNode {
         hash: hash.into(),
         short_hash: hash.into(),
-        parents: vec![],
+        parents: parents.iter().map(|p| p.to_string()).collect(),
         author_name: String::new(),
         author_email: String::new(),
-        author_time: t,
+        author_time: 0,
         subject: String::new(),
         refs: vec![],
-    };
-    let stash = |hash: &str, t: i64| CommitNode {
+    }
+}
+
+fn stash_node(hash: &str, base: &str, selector: &str) -> CommitNode {
+    CommitNode {
         refs: vec![RefLabel {
             kind: RefKind::Stash,
-            name: "stash@{0}".into(),
+            name: selector.into(),
         }],
-        ..commit(hash, t)
-    };
-    let commits = vec![commit("c30", 30), commit("c10", 10)];
-    let stashes = vec![stash("s20", 20)];
-    let order: Vec<String> = merge_stashes(commits, stashes)
-        .into_iter()
-        .map(|c| c.hash)
+        ..node(hash, &[base])
+    }
+}
+
+fn hashes(nodes: &[CommitNode]) -> Vec<&str> {
+    nodes.iter().map(|c| c.hash.as_str()).collect()
+}
+
+#[test]
+fn place_stashes_puts_each_stash_directly_above_its_base() {
+    let commits = vec![node("c3", &["c2"]), node("c2", &["c1"]), node("c1", &[])];
+    let stashes = vec![
+        stash_node("s0", "c1", "stash@{0}"),
+        stash_node("s1", "c3", "stash@{1}"),
+    ];
+    let placed = place_stashes(commits, &stashes);
+    assert_eq!(hashes(&placed), vec!["s1", "c3", "c2", "s0", "c1"]);
+}
+
+#[test]
+fn place_stashes_drops_stashes_whose_base_is_not_loaded() {
+    // The base is filtered out by the branch selection (or on a later page):
+    // showing the stash would open a lane that never closes.
+    let commits = vec![node("c2", &["c1"]), node("c1", &[])];
+    let stashes = vec![stash_node("s0", "elsewhere", "stash@{0}")];
+    let placed = place_stashes(commits, &stashes);
+    assert_eq!(hashes(&placed), vec!["c2", "c1"]);
+}
+
+#[test]
+fn place_stashes_keeps_stash_list_order_on_a_shared_base() {
+    let commits = vec![node("c1", &[])];
+    let stashes = vec![
+        stash_node("s0", "c1", "stash@{0}"),
+        stash_node("s1", "c1", "stash@{1}"),
+    ];
+    let placed = place_stashes(commits, &stashes);
+    assert_eq!(hashes(&placed), vec!["s0", "s1", "c1"]);
+}
+
+#[test]
+fn placed_stashes_do_not_widen_the_graph() {
+    // Regression: stashes based on unloaded commits used to each hold a lane
+    // open to the bottom of the graph (168 lanes on a repo with many stashes).
+    let commits = vec![node("c3", &["c2"]), node("c2", &["c1"]), node("c1", &[])];
+    let mut stashes: Vec<CommitNode> = (0..50)
+        .map(|i| stash_node(&format!("off{i}"), &format!("unloaded{i}"), "stash@{9}"))
         .collect();
-    // 30 (commit) > 20 (stash) > 10 (commit).
-    assert_eq!(order, vec!["c30", "s20", "c10"]);
+    stashes.push(stash_node("s", "c2", "stash@{0}"));
+    let placed = place_stashes(commits, &stashes);
+    let layout = super::super::layout::assign_lanes(&placed);
+    assert_eq!(layout.max_lanes, 2);
 }

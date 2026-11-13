@@ -24,6 +24,10 @@ const ROW_HEIGHT: f32 = 22.0;
 const LINE_THICKNESS: f32 = 2.0;
 /// Commit dot diameter.
 const DOT_DIAMETER: f32 = 8.0;
+/// The lane area never takes more than this share of the row, so the hash, refs,
+/// and subject always stay visible however many lanes the loaded history needs.
+/// Lanes past the cap are clipped.
+const MAX_GRAPH_FRACTION: f32 = 0.4;
 
 /// Lane color palette, indexed by `color_idx % LEN`. Phase 5 may replace this
 /// with theme tokens.
@@ -105,8 +109,14 @@ impl GitGraphRowCanvas {
         }
     }
 
-    fn width(&self) -> f32 {
+    /// Width needed to draw every lane column.
+    fn full_width(&self) -> f32 {
         self.lane_count.max(1) as f32 * LANE_WIDTH
+    }
+
+    /// Whether lane column `col` fits entirely inside a lane area `width` wide.
+    fn col_visible(col: usize, width: f32) -> bool {
+        (col + 1) as f32 * LANE_WIDTH <= width + 0.5
     }
 
     fn col_center_x(origin: Vector2F, col: usize) -> f32 {
@@ -145,11 +155,19 @@ impl GitGraphRowCanvas {
 impl Element for GitGraphRowCanvas {
     fn layout(
         &mut self,
-        _constraint: SizeConstraint,
+        constraint: SizeConstraint,
         _ctx: &mut LayoutContext,
         _app: &AppContext,
     ) -> Vector2F {
-        let size = vec2f(self.width(), ROW_HEIGHT);
+        // Every row gets the same constraint (the list width), so the cap is the
+        // same on every row and the lane columns stay aligned.
+        let available = constraint.max.x();
+        let cap = if available.is_finite() {
+            (available * MAX_GRAPH_FRACTION).max(LANE_WIDTH)
+        } else {
+            f32::INFINITY
+        };
+        let size = vec2f(self.full_width().min(cap), ROW_HEIGHT);
         self.size = Some(size);
         size
     }
@@ -164,9 +182,16 @@ impl Element for GitGraphRowCanvas {
         let bot = origin.y() + ROW_HEIGHT;
         let node_x = Self::col_center_x(origin, self.row.node_col);
         let radius = DOT_DIAMETER / 2.0;
+        // Lanes beyond the capped width (see `layout`) are not drawn, and
+        // connectors are clamped to the right edge.
+        let width = self.size.map_or_else(|| self.full_width(), |s| s.x());
+        let right_edge = origin.x() + width;
+        let visible = |col: usize| Self::col_visible(col, width);
+        let node_visible = visible(self.row.node_col);
+        let clamp = |x: f32| x.min(right_edge);
 
         // Continuing lanes passing through this row: a full-height vertical line.
-        for lane in &self.row.passing {
+        for lane in self.row.passing.iter().filter(|lane| visible(lane.col)) {
             Self::draw_vertical(
                 ctx,
                 Self::col_center_x(origin, lane.col),
@@ -180,7 +205,7 @@ impl Element for GitGraphRowCanvas {
         // A hollow ring has a transparent center, so the segment is trimmed to the
         // ring's top edge — otherwise it would show through the hollow center and
         // make the ring read as a filled dot.
-        if self.row.node_continues_up {
+        if self.row.node_continues_up && node_visible {
             let y1 = if self.hollow { mid - radius } else { mid };
             Self::draw_vertical(ctx, node_x, top, y1, lane_color(self.row.node_color));
         }
@@ -191,8 +216,12 @@ impl Element for GitGraphRowCanvas {
         for child in &self.row.from_children {
             let child_x = Self::col_center_x(origin, child.col);
             let color = lane_color(child.color_idx);
-            Self::draw_vertical(ctx, child_x, top, mid, color);
-            Self::draw_horizontal(ctx, child_x, node_x, mid, color);
+            if visible(child.col) {
+                Self::draw_vertical(ctx, child_x, top, mid, color);
+            }
+            if visible(child.col) || node_visible {
+                Self::draw_horizontal(ctx, clamp(child_x), clamp(node_x), mid, color);
+            }
         }
 
         // This node connecting down to each parent: horizontal (node column ->
@@ -202,9 +231,13 @@ impl Element for GitGraphRowCanvas {
             let parent_x = Self::col_center_x(origin, parent.col);
             let color = lane_color(parent.color_idx);
             if parent.col != self.row.node_col {
-                Self::draw_horizontal(ctx, node_x, parent_x, mid, color);
-                Self::draw_vertical(ctx, parent_x, mid, bot, color);
-            } else {
+                if visible(parent.col) || node_visible {
+                    Self::draw_horizontal(ctx, clamp(node_x), clamp(parent_x), mid, color);
+                }
+                if visible(parent.col) {
+                    Self::draw_vertical(ctx, parent_x, mid, bot, color);
+                }
+            } else if node_visible {
                 // Straight-down lane at the node column: trim it to the ring's
                 // bottom edge for a hollow node so it doesn't bleed through the
                 // transparent center.
@@ -217,6 +250,9 @@ impl Element for GitGraphRowCanvas {
         // uncommitted row draws a ring (border only) instead — reads as "not a
         // real commit" — and its transparent center lets the row's
         // hover/selection highlight show through.
+        if !node_visible {
+            return;
+        }
         let color = lane_color(self.row.node_color);
         let dot = ctx.scene.draw_rect_with_hit_recording(RectF::new(
             vec2f(node_x - radius, mid - radius),

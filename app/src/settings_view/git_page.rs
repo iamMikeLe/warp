@@ -34,6 +34,8 @@ const SCAN_DEPTH_OPTIONS: &[(u32, &str)] = &[
 pub enum GitSettingsPageAction {
     /// Toggle the visibility of the Git Graph panel.
     ToggleShowGitGraph,
+    /// Toggle whether stashes are shown in the Git Graph.
+    ToggleShowStashes,
     /// Set the repository scan depth.
     SetScanDepth(u32),
 }
@@ -59,6 +61,7 @@ impl GitSettingsPageView {
 
         let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> = vec![
             Box::new(ShowGitGraphToggleWidget::default()),
+            Box::new(ShowStashesToggleWidget::default()),
             Box::new(ScanDepthWidget::default()),
         ];
         Self {
@@ -117,6 +120,12 @@ impl TypedActionView for GitSettingsPageView {
             GitSettingsPageAction::ToggleShowGitGraph => {
                 GitSettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(settings.show_git_graph.toggle_and_save_value(ctx));
+                });
+                ctx.notify();
+            }
+            GitSettingsPageAction::ToggleShowStashes => {
+                GitSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings.show_git_graph_stashes.toggle_and_save_value(ctx));
                 });
                 ctx.notify();
             }
@@ -195,6 +204,51 @@ impl SettingsWidget for ShowGitGraphToggleWidget {
                 })
                 .finish(),
             Some("Adds a read-only commit graph (DAG) panel to the left side tools panel.".into()),
+        )
+    }
+}
+
+/// Whether the Git Graph shows stashes.
+#[derive(Default)]
+struct ShowStashesToggleWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for ShowStashesToggleWidget {
+    type View = GitSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "git graph stash stashes show hide"
+    }
+
+    fn render(
+        &self,
+        _view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let git_settings = GitSettings::as_ref(app);
+
+        render_body_item::<GitSettingsPageAction>(
+            "Show stashes".into(),
+            None,
+            LocalOnlyIconState::Hidden,
+            ToggleState::Enabled,
+            appearance,
+            appearance
+                .ui_builder()
+                .switch(self.switch_state.clone())
+                .check(*git_settings.show_git_graph_stashes)
+                .build()
+                .on_click(move |ctx, _, _| {
+                    ctx.dispatch_typed_action(GitSettingsPageAction::ToggleShowStashes);
+                })
+                .finish(),
+            Some(
+                "Shows each stash above the commit it was made on. Stashes made on branches \
+                 hidden by the branch filter are not shown."
+                    .into(),
+            ),
         )
     }
 }
