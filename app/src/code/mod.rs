@@ -119,6 +119,7 @@ pub enum SaveOutcome {
 pub mod file_tree;
 pub mod footer;
 mod icon;
+pub mod material_icons;
 
 pub mod active_file;
 pub mod opened_files;
