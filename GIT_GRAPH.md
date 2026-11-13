@@ -72,3 +72,8 @@ git merge upstream/master   # merge, don't rebase: the branch carries the origin
 
 Same as Warp: AGPL-3.0 (with MIT-licensed parts); see [LICENSE-AGPL](LICENSE-AGPL) and
 [LICENSE-MIT](LICENSE-MIT).
+
+## Trademarks
+
+GitKraken and Warp are trademarks of their respective owners. This project is not affiliated
+with or endorsed by either; GitKraken is mentioned only to describe the style of the view.
