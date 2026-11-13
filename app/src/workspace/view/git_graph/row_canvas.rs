@@ -78,7 +78,7 @@ const PALETTE: [ColorU; 7] = [
     }, // yellow
 ];
 
-fn lane_color(idx: usize) -> ColorU {
+pub(crate) fn lane_color(idx: usize) -> ColorU {
     PALETTE[idx % PALETTE.len()]
 }
 

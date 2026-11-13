@@ -586,3 +586,29 @@ fn parse_commit_log_without_body_has_empty_preview() {
     let commits = parse_commit_log(&input);
     assert_eq!(commits[0].body_preview, "");
 }
+
+#[test]
+fn body_preview_skips_trailer_only_bodies() {
+    assert_eq!(first_body_line("\nCo-Authored-By: A <a@example.com>\n"), "");
+    assert_eq!(
+        first_body_line("Signed-off-by: A <a@example.com>\nReviewed-by: B <b@example.com>"),
+        ""
+    );
+}
+
+#[test]
+fn body_preview_keeps_text_before_trailers() {
+    assert_eq!(
+        first_body_line("\nReal explanation.\n\nCo-Authored-By: A <a@example.com>\n"),
+        "Real explanation."
+    );
+}
+
+#[test]
+fn body_preview_keeps_ordinary_colon_lines() {
+    assert_eq!(
+        first_body_line("Note: this is prose"),
+        "Note: this is prose"
+    );
+    assert_eq!(first_body_line("# Conflicts:\n#\tfile.rs"), "# Conflicts:");
+}

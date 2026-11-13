@@ -10,14 +10,14 @@ use warp_core::ui::theme::color::internal_colors;
 use warpui::elements::{
     Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, DragBarSide, Element,
     Empty, Expanded, Fill, Flex, Highlight, Hoverable, MainAxisSize, MouseStateHandle,
-    ParentElement, Radius, Resizable, ResizableStateHandle, ScrollbarWidth, Text,
+    ParentElement, Radius, Resizable, ResizableStateHandle, ScrollbarWidth, Shrinkable, Text,
 };
 use warpui::text_layout::ClipConfig;
 
 use super::data::{CommitNode, RefKind, RefLabel};
 use super::layout::GraphRow;
-use super::row_canvas::GitGraphRowCanvas;
-use super::view::{GitGraphAction, ref_badge_color, ref_menu_kind};
+use super::row_canvas::{GitGraphRowCanvas, lane_color};
+use super::view::{GitGraphAction, ref_menu_kind};
 use crate::appearance::Appearance;
 
 /// Default Branch / Tag column width.
@@ -29,8 +29,9 @@ const MIN_GRAPH_WIDTH: f32 = 32.0;
 /// Shortest connector kept between a ref label and the graph, so the link to the
 /// commit stays visible even when the label fills the column.
 const MIN_CONNECTOR: f32 = 10.0;
-/// Space reserved for the "+N" chip when a row has more refs than it shows.
-const OVERFLOW_CHIP_WIDTH: f32 = 30.0;
+/// Faint tint of a commit's lane color behind its whole row, so a row's label, lane, and message
+/// read as one unit.
+const ROW_TINT_ALPHA: u8 = 0x1c;
 const HEADER_HEIGHT: f32 = 24.0;
 const CELL_PADDING: f32 = 6.0;
 
@@ -132,13 +133,17 @@ fn header_label(text: &str, appearance: &Appearance) -> Box<dyn Element> {
 pub(super) fn render_column_header(
     refs_state: &ResizableStateHandle,
     graph_state: &ResizableStateHandle,
+    widths: ColumnWidths,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
     let hover: Fill = internal_colors::fg_overlay_5(appearance.theme()).into();
-    let resizable_cell = |state: &ResizableStateHandle, text: &str, min: f32| {
+    // `Resizable` only caps its child's width, so the cell has to claim the full column width
+    // itself to line up with the rows.
+    let resizable_cell = |state: &ResizableStateHandle, width: f32, text: &str, min: f32| {
         Resizable::new(
             state.clone(),
             ConstrainedBox::new(header_label(text, appearance))
+                .with_width(width)
                 .with_height(HEADER_HEIGHT)
                 .finish(),
         )
@@ -155,8 +160,18 @@ pub(super) fn render_column_header(
         Flex::row()
             .with_main_axis_size(MainAxisSize::Max)
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_child(resizable_cell(refs_state, "BRANCH / TAG", MIN_REFS_WIDTH))
-            .with_child(resizable_cell(graph_state, "GRAPH", MIN_GRAPH_WIDTH))
+            .with_child(resizable_cell(
+                refs_state,
+                widths.refs,
+                "BRANCH / TAG",
+                MIN_REFS_WIDTH,
+            ))
+            .with_child(resizable_cell(
+                graph_state,
+                widths.graph,
+                "GRAPH",
+                MIN_GRAPH_WIDTH,
+            ))
             .with_child(Expanded::new(1.0, header_label("COMMIT MESSAGE", appearance)).finish())
             .finish(),
     )
@@ -164,17 +179,16 @@ pub(super) fn render_column_header(
     .finish()
 }
 
-/// A ref label for the Branch / Tag cell: an icon (two when a local branch and
-/// its remote-tracking branch point here), the name clipped to `max_width`, and
-/// the row's right-click ref menu.
+/// A ref label for the Branch / Tag cell, in its commit's lane color: an icon for the ref kind (two
+/// when a local branch and its remote-tracking branch point here), the name (ellipsized to fit),
+/// and the ref's right-click menu.
 fn render_ref_label(
     primary: &PrimaryRef<'_>,
-    max_width: f32,
+    color: ColorU,
     menu_target: (usize, &str),
     appearance: &Appearance,
 ) -> Box<dyn Element> {
     let label = primary.label;
-    let color = ref_badge_color(label.kind);
     let is_current = label.kind == RefKind::Head;
     let (bg, fg) = if is_current {
         (color, warp_core::ui::color::pick_foreground_color(color))
@@ -192,29 +206,29 @@ fn render_ref_label(
         );
     }
     content = content.with_child(
-        Container::new(
-            Text::new_inline(
-                label.name.clone(),
-                appearance.ui_font_family(),
-                appearance.ui_font_size(),
+        Shrinkable::new(
+            1.0,
+            Container::new(
+                Text::new_inline(
+                    label.name.clone(),
+                    appearance.ui_font_family(),
+                    appearance.ui_font_size(),
+                )
+                .with_color(fg.into())
+                .with_clip(ClipConfig::ellipsis())
+                .finish(),
             )
-            .with_color(fg.into())
-            .with_clip(ClipConfig::ellipsis())
+            .with_padding_left(4.)
             .finish(),
         )
-        .with_padding_left(4.)
         .finish(),
     );
-    let pill = ConstrainedBox::new(
-        Container::new(content.finish())
-            .with_background_color(bg)
-            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(3.)))
-            .with_horizontal_padding(5.)
-            .with_vertical_padding(2.)
-            .finish(),
-    )
-    .with_max_width(max_width.max(0.))
-    .finish();
+    let pill = Container::new(content.finish())
+        .with_background_color(bg)
+        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(3.)))
+        .with_horizontal_padding(5.)
+        .with_vertical_padding(2.)
+        .finish();
 
     let (index, position_id) = menu_target;
     let position_id = position_id.to_string();
@@ -260,25 +274,21 @@ fn render_overflow_chip(hidden: usize, appearance: &Appearance) -> Box<dyn Eleme
     .finish()
 }
 
-/// A thin horizontal line that fills the remaining cell width.
-fn connector(color: ColorU) -> Box<dyn Element> {
-    Expanded::new(
-        1.0,
-        Container::new(
-            ConstrainedBox::new(Empty::new().finish())
-                .with_height(2.)
-                .finish(),
-        )
+fn connector_line(color: ColorU, width: Option<f32>) -> Box<dyn Element> {
+    let mut line = ConstrainedBox::new(Empty::new().finish()).with_height(2.);
+    if let Some(width) = width {
+        line = line.with_width(width);
+    }
+    Container::new(line.finish())
         .with_background_color(ColorU { a: 0x99, ..color })
-        .finish(),
-    )
-    .finish()
+        .finish()
 }
 
 /// The Branch / Tag cell: the row's primary ref, a "+N" chip for the rest, and a
 /// connector to the graph. Empty when the commit has no refs.
 fn render_refs_cell(
     commit: &CommitNode,
+    color: ColorU,
     index: usize,
     position_id: &str,
     width: f32,
@@ -292,26 +302,24 @@ fn render_refs_cell(
             None,
         );
     };
-    let color = ref_badge_color(primary.label.kind);
-    let chip_width = if primary.hidden > 0 {
-        OVERFLOW_CHIP_WIDTH
-    } else {
-        0.
-    };
-    let label_max = width - CELL_PADDING - chip_width - MIN_CONNECTOR;
+    // Flexible children are laid out in order from the space left after the fixed ones, so the
+    // label's large flex lets it take what it needs and the connector gets the remainder.
     let mut row = Flex::row()
         .with_main_axis_size(MainAxisSize::Max)
         .with_cross_axis_alignment(CrossAxisAlignment::Center)
-        .with_child(render_ref_label(
-            &primary,
-            label_max,
-            (index, position_id),
-            appearance,
-        ));
+        .with_child(
+            Shrinkable::new(
+                1000.0,
+                render_ref_label(&primary, color, (index, position_id), appearance),
+            )
+            .finish(),
+        );
     if primary.hidden > 0 {
         row = row.with_child(render_overflow_chip(primary.hidden, appearance));
     }
-    row = row.with_child(connector(color));
+    row = row
+        .with_child(connector_line(color, Some(MIN_CONNECTOR)))
+        .with_child(Expanded::new(1.0, connector_line(color, None)).finish());
     let cell = ConstrainedBox::new(
         Container::new(row.finish())
             .with_padding_left(CELL_PADDING)
@@ -369,9 +377,10 @@ pub(super) fn render_commit_row(
     widths: ColumnWidths,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
+    let color = lane_color(row.node_color);
     let (refs_cell, connector_color) =
-        render_refs_cell(commit, index, position_id, widths.refs, appearance);
-    Flex::row()
+        render_refs_cell(commit, color, index, position_id, widths.refs, appearance);
+    let cells = Flex::row()
         .with_main_axis_size(MainAxisSize::Max)
         .with_cross_axis_alignment(CrossAxisAlignment::Center)
         .with_child(refs_cell)
@@ -388,6 +397,12 @@ pub(super) fn render_commit_row(
             )
             .finish(),
         )
+        .finish();
+    Container::new(cells)
+        .with_background_color(ColorU {
+            a: ROW_TINT_ALPHA,
+            ..color
+        })
         .finish()
 }
 

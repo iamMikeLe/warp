@@ -1988,6 +1988,7 @@ impl GitGraphView {
             .with_child(columns::render_column_header(
                 &self.refs_column_state,
                 &self.graph_column_state,
+                widths,
                 appearance,
             ))
             .with_child(Expanded::new(1.0, scrollable).finish())

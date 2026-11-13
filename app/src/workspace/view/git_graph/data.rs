@@ -125,13 +125,50 @@ fn parse_commit_record(record: &str) -> Option<CommitNode> {
     })
 }
 
-/// The first non-blank line of a commit body, trimmed.
+/// The first non-blank line of a commit body, trimmed, ignoring a trailing block of git trailers
+/// (`Co-Authored-By: …`, `Signed-off-by: …`) so a body that is only trailers previews as empty.
 fn first_body_line(body: &str) -> String {
-    body.lines()
-        .map(str::trim)
+    let lines: Vec<&str> = body.lines().map(str::trim).collect();
+    let mut end = lines.len();
+    while end > 0 && lines[end - 1].is_empty() {
+        end -= 1;
+    }
+    let mut trailers_start = end;
+    while trailers_start > 0 && is_trailer_line(lines[trailers_start - 1]) {
+        trailers_start -= 1;
+    }
+    let trailer_block_is_a_paragraph =
+        trailers_start < end && (trailers_start == 0 || lines[trailers_start - 1].is_empty());
+    let content_end = if trailer_block_is_a_paragraph {
+        trailers_start
+    } else {
+        end
+    };
+    lines[..content_end]
+        .iter()
         .find(|line| !line.is_empty())
+        .copied()
         .unwrap_or("")
         .to_string()
+}
+
+/// A `Token: value` line in git's trailer style. Hyphenated tokens (`Signed-off-by`) are always
+/// trailers; single words are only for the common issue-reference keys, so a body line like
+/// `Note: …` is not mistaken for one.
+fn is_trailer_line(line: &str) -> bool {
+    let Some((token, value)) = line.split_once(": ") else {
+        return false;
+    };
+    let is_token = !token.is_empty()
+        && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && token
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic());
+    let known_single_word = ["Fixes", "Closes", "Resolves", "Refs"]
+        .iter()
+        .any(|key| token.eq_ignore_ascii_case(key));
+    is_token && !value.trim().is_empty() && (token.contains('-') || known_single_word)
 }
 
 /// Parse the `%D` decorate string (from `--decorate=full`) into a list of ref labels.
