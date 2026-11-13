@@ -16,14 +16,14 @@ use warpui::{AppContext, EventContext, LayoutContext, PaintContext, SizeConstrai
 use super::layout::GraphRow;
 
 /// Pixel width of a single lane.
-const LANE_WIDTH: f32 = 14.0;
+pub(crate) const LANE_WIDTH: f32 = 16.0;
 /// Row height (aligned with the text rows on the right; UniformList uses this as
 /// the uniform row height).
-const ROW_HEIGHT: f32 = 22.0;
+pub(crate) const ROW_HEIGHT: f32 = 28.0;
 /// Line thickness.
 const LINE_THICKNESS: f32 = 2.0;
 /// Commit dot diameter.
-const DOT_DIAMETER: f32 = 8.0;
+const DOT_DIAMETER: f32 = 10.0;
 /// The lane area never takes more than this share of the row, so the hash, refs,
 /// and subject always stay visible however many lanes the loaded history needs.
 /// Lanes past the cap are clipped.
@@ -94,6 +94,13 @@ pub(crate) struct GitGraphRowCanvas {
     /// commit"). The HEAD "you are here" marker is drawn next to the branch pill
     /// instead (see `render_ref_badge`), not on the lane.
     hollow: bool,
+    /// Width set by the Graph column (see `columns.rs`); `None` sizes to the
+    /// lane count. Either way the Phase 1 cap still applies.
+    fixed_width: Option<f32>,
+    /// When the commit carries a ref, a line in that ref's color from the left
+    /// edge of the lane area to the node, continuing the connector drawn in the
+    /// Branch / Tag column.
+    ref_connector: Option<ColorU>,
     origin: Option<Point>,
     size: Option<Vector2F>,
 }
@@ -104,9 +111,23 @@ impl GitGraphRowCanvas {
             row,
             lane_count,
             hollow,
+            fixed_width: None,
+            ref_connector: None,
             origin: None,
             size: None,
         }
+    }
+
+    /// Sizes the lane area to the Graph column's width instead of the lane count.
+    pub(crate) fn with_width(mut self, width: f32) -> Self {
+        self.fixed_width = Some(width);
+        self
+    }
+
+    /// Draws a connector from the left edge to the node (see [`Self::ref_connector`]).
+    pub(crate) fn with_ref_connector(mut self, color: Option<ColorU>) -> Self {
+        self.ref_connector = color;
+        self
     }
 
     /// Width needed to draw every lane column.
@@ -167,7 +188,8 @@ impl Element for GitGraphRowCanvas {
         } else {
             f32::INFINITY
         };
-        let size = vec2f(self.full_width().min(cap), ROW_HEIGHT);
+        let wanted = self.fixed_width.unwrap_or_else(|| self.full_width());
+        let size = vec2f(wanted.min(cap), ROW_HEIGHT);
         self.size = Some(size);
         size
     }
@@ -189,6 +211,12 @@ impl Element for GitGraphRowCanvas {
         let visible = |col: usize| Self::col_visible(col, width);
         let node_visible = visible(self.row.node_col);
         let clamp = |x: f32| x.min(right_edge);
+
+        // Ref connector first, so lanes and the node draw over it.
+        if let Some(color) = self.ref_connector {
+            let end = if node_visible { node_x } else { right_edge };
+            Self::draw_horizontal(ctx, origin.x(), end, mid, ColorU { a: 0x99, ..color });
+        }
 
         // Continuing lanes passing through this row: a full-height vertical line.
         for lane in self.row.passing.iter().filter(|lane| visible(lane.col)) {

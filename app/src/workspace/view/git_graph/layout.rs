@@ -239,6 +239,7 @@ pub(crate) fn build_layout(commits: &[CommitNode], has_uncommitted: bool) -> Gra
                 author_email: String::new(),
                 author_time: 0,
                 subject: String::new(),
+                body_preview: String::new(),
                 refs: Vec::new(),
             };
             let mut with_sentinel = Vec::with_capacity(commits.len() + 1);

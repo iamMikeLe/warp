@@ -29,7 +29,7 @@ const RECORD_SEP: char = '\u{1e}';
 /// hash / parents / author name / author email / author time / decorate / subject.
 /// `%x1f` and `%x1e` are git's escape notation for the two separator bytes above.
 #[cfg(not(target_family = "wasm"))]
-const LOG_FORMAT: &str = "--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%s%x1e";
+const LOG_FORMAT: &str = "--pretty=format:%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%s%x1f%b%x1e";
 
 /// A single commit node, carrying everything needed to render one graph row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +46,9 @@ pub(crate) struct CommitNode {
     pub author_time: i64,
     /// First line of the commit message.
     pub subject: String,
+    /// First non-empty line of the message body (empty when there is none),
+    /// shown dimmed after the subject.
+    pub body_preview: String,
     /// Ref labels pointing at this commit (branch / remote branch / tag / HEAD).
     pub refs: Vec<RefLabel>,
 }
@@ -90,9 +93,9 @@ pub(crate) fn parse_commit_log(stdout: &str) -> Vec<CommitNode> {
 /// Parse a single commit record. Returns `None` when fields are missing
 /// (skipping the record rather than panicking).
 fn parse_commit_record(record: &str) -> Option<CommitNode> {
-    // splitn(7) ensures the final subject field is kept intact even if it
-    // contains the separator.
-    let mut fields = record.splitn(7, UNIT_SEP);
+    // splitn(8) keeps the final body field intact even if it contains the
+    // separator.
+    let mut fields = record.splitn(8, UNIT_SEP);
     let hash = fields.next()?.to_string();
     let parents_raw = fields.next()?;
     let author_name = fields.next()?.to_string();
@@ -100,6 +103,7 @@ fn parse_commit_record(record: &str) -> Option<CommitNode> {
     let author_time = fields.next()?.trim().parse::<i64>().ok()?;
     let decorate = fields.next()?;
     let subject = fields.next().unwrap_or("").to_string();
+    let body_preview = first_body_line(fields.next().unwrap_or(""));
 
     let parents = parents_raw
         .split_whitespace()
@@ -116,8 +120,18 @@ fn parse_commit_record(record: &str) -> Option<CommitNode> {
         author_email,
         author_time,
         subject,
+        body_preview,
         refs,
     })
+}
+
+/// The first non-blank line of a commit body, trimmed.
+fn first_body_line(body: &str) -> String {
+    body.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+        .to_string()
 }
 
 /// Parse the `%D` decorate string (from `--decorate=full`) into a list of ref labels.
@@ -289,6 +303,7 @@ fn parse_stash_record(record: &str) -> Option<CommitNode> {
         author_email,
         author_time,
         subject,
+        body_preview: String::new(),
         refs: vec![RefLabel {
             kind: RefKind::Stash,
             name: selector,

@@ -494,6 +494,7 @@ fn node(hash: &str, parents: &[&str]) -> CommitNode {
         author_email: String::new(),
         author_time: 0,
         subject: String::new(),
+        body_preview: String::new(),
         refs: vec![],
     }
 }
@@ -556,4 +557,32 @@ fn placed_stashes_do_not_widen_the_graph() {
     let placed = place_stashes(commits, &stashes);
     let layout = super::super::layout::assign_lanes(&placed);
     assert_eq!(layout.max_lanes, 2);
+}
+
+#[test]
+fn parse_commit_log_takes_first_non_blank_body_line_as_preview() {
+    let input = format!(
+        "h1{US}{US}A{US}a@example.com{US}1700000000{US}{US}feat: subject{US}\n\n  first body line \nsecond line\n{RS}",
+        US = UNIT_SEP,
+        RS = RECORD_SEP,
+    );
+    let commits = parse_commit_log(&input);
+    assert_eq!(commits.len(), 1);
+    assert_eq!(commits[0].subject, "feat: subject");
+    assert_eq!(commits[0].body_preview, "first body line");
+}
+
+#[test]
+fn parse_commit_log_without_body_has_empty_preview() {
+    let input = rec(
+        "h1",
+        "",
+        "A",
+        "a@example.com",
+        "1700000000",
+        "",
+        "only a subject",
+    );
+    let commits = parse_commit_log(&input);
+    assert_eq!(commits[0].body_preview, "");
 }

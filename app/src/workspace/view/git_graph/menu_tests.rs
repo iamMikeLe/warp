@@ -13,6 +13,7 @@ fn commit() -> CommitNode {
         author_email: "ada@x".into(),
         author_time: 0,
         subject: "Do a thing".into(),
+        body_preview: String::new(),
         refs: vec![],
     }
 }
@@ -94,22 +95,6 @@ fn commit_copy_actions_carry_hash_and_subject() {
             &GitGraphAction::CopyToClipboard("Do a thing".into()),
         ]
     );
-}
-
-#[test]
-fn short_hash_menu_copies_eight_char_hash_regardless_of_write_flag() {
-    // A right-click on the short hash yields a single copy item carrying the
-    // 8-char short hash (not the full 40-char commit hash); copying is read-only
-    // so the write flag doesn't change it.
-    let kind = MenuKind::ShortHash { index: 0 };
-    for write_enabled in [true, false] {
-        let items = build_menu(&kind, &commit(), write_enabled);
-        assert_eq!(labels(&items), vec!["Copy Short Hash to Clipboard"]);
-        assert_eq!(
-            items[0].item_on_select_action(),
-            Some(&GitGraphAction::CopyToClipboard("abcdef12".into()))
-        );
-    }
 }
 
 #[test]

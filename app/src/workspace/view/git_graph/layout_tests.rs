@@ -15,6 +15,7 @@ fn node(hash: &str, parents: &[&str]) -> CommitNode {
         author_email: String::new(),
         author_time: 0,
         subject: String::new(),
+        body_preview: String::new(),
         refs: Vec::new(),
     }
 }

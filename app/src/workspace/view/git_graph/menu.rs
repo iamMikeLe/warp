@@ -19,13 +19,6 @@ pub(crate) enum MenuKind {
     Commit {
         index: usize,
     },
-    /// The short-hash text to the left of a commit's subject. Opens a focused
-    /// menu with just "Copy Short Hash to Clipboard" (the 8-char hash), so a
-    /// right-click landing on the hash copies exactly what's shown rather than
-    /// the full 40-char hash offered by the commit menu.
-    ShortHash {
-        index: usize,
-    },
     Tag {
         index: usize,
         name: String,
@@ -58,7 +51,6 @@ impl MenuKind {
     pub(crate) fn index(&self) -> usize {
         match self {
             MenuKind::Commit { index }
-            | MenuKind::ShortHash { index }
             | MenuKind::Tag { index, .. }
             | MenuKind::RemoteBranch { index, .. }
             | MenuKind::LocalBranch { index, .. }
@@ -173,7 +165,6 @@ pub(crate) fn build_menu(
 ) -> Vec<MenuItem<GitGraphAction>> {
     match kind {
         MenuKind::Commit { .. } => build_commit_menu(commit, write_enabled),
-        MenuKind::ShortHash { .. } => build_short_hash_menu(commit),
         MenuKind::Tag { index, name } => build_tag_menu(*index, name, write_enabled),
         MenuKind::RemoteBranch { name, .. } => build_remote_branch_menu(name, write_enabled),
         MenuKind::LocalBranch {
@@ -334,17 +325,6 @@ fn build_commit_menu(commit: &CommitNode, write_enabled: bool) -> Vec<MenuItem<G
     ];
 
     join_groups(vec![create, apply, current_branch, copy])
-}
-
-/// The focused menu for a right-click on the short-hash text: a single
-/// "Copy Short Hash to Clipboard" that copies the displayed 8-char hash. Always
-/// available (copying is read-only), independent of `write_enabled`. Distinct
-/// from the commit menu's "Copy Commit Hash", which copies the full hash.
-fn build_short_hash_menu(commit: &CommitNode) -> Vec<MenuItem<GitGraphAction>> {
-    vec![item(
-        "Copy Short Hash to Clipboard",
-        GitGraphAction::CopyToClipboard(commit.short_hash.clone()),
-    )]
 }
 
 fn build_tag_menu(index: usize, name: &str, write_enabled: bool) -> Vec<MenuItem<GitGraphAction>> {

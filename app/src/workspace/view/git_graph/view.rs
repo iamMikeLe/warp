@@ -55,11 +55,11 @@ use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewCon
 
 #[cfg(feature = "local_fs")]
 use super::auto_refresh;
+use super::columns::{self, ColumnWidths};
 use super::data::{BranchRef, ChangedFile, CommitDetail, CommitNode, RefKind, RefLabel};
-use super::layout::{GraphLayout, GraphRow, build_layout};
+use super::layout::{GraphLayout, build_layout};
 use super::menu::{DEFAULT_PUSH_REMOTE, MenuKind, PromptKind, build_menu};
 use super::ops::{GitWriteOp, ResetMode, archive_format_from_path};
-use super::row_canvas::GitGraphRowCanvas;
 use crate::appearance::Appearance;
 use crate::code::editor::{add_color, remove_color};
 use crate::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions};
@@ -394,6 +394,9 @@ pub(crate) struct GitGraphView {
     /// [`Self::render_resizable_detail`] overrides it to 1/2 of the window
     /// height.
     detail_resizable_state: ResizableStateHandle,
+    /// Branch / Tag and Graph column widths, set by dragging the column header.
+    refs_column_state: ResizableStateHandle,
+    graph_column_state: ResizableStateHandle,
     /// Whether the detail area's height has had its "default to 1/2 on first
     /// open" initialization: this runs only once; afterwards we keep the height
     /// the user dragged to.
@@ -691,6 +694,8 @@ impl GitGraphView {
             loading_shimmer: ShimmeringTextStateHandle::new(),
             op_shimmer: ShimmeringTextStateHandle::new(),
             detail_resizable_state: resizable_state_handle(220.0),
+            refs_column_state: resizable_state_handle(columns::DEFAULT_REFS_WIDTH),
+            graph_column_state: resizable_state_handle(columns::DEFAULT_GRAPH_WIDTH),
             detail_height_initialized: Arc::new(AtomicBool::new(false)),
             detail_close_mouse_state: MouseStateHandle::default(),
             detail_selection_handles: Default::default(),
@@ -1832,6 +1837,7 @@ impl GitGraphView {
         let row_count = layout.rows.len();
         let total = row_count + usize::from(has_more);
         let position_id = self.position_id.clone();
+        let widths = ColumnWidths::read(&self.refs_column_state, &self.graph_column_state);
 
         let list = UniformList::new(self.list_state.clone(), total, move |range, app| {
             let appearance = Appearance::as_ref(app);
@@ -1848,8 +1854,13 @@ impl GitGraphView {
                     // Synthetic "uncommitted changes" row (hollow node); not
                     // selectable yet, but highlights on hover.
                     if offset == 1 && i == 0 {
-                        let element =
-                            render_uncommitted_row(row, lane_count, uncommitted_count, appearance);
+                        let element = columns::render_wip_row(
+                            row,
+                            lane_count,
+                            uncommitted_count,
+                            widths,
+                            appearance,
+                        );
                         let row_position_id = position_id.clone();
                         return Some(
                             Hoverable::new(state, move |mouse_state| {
@@ -1886,12 +1897,13 @@ impl GitGraphView {
                     }
                     let commit_idx = i - offset;
                     let commit = commits.get(commit_idx)?;
-                    let element = render_graph_row(
+                    let element = columns::render_commit_row(
                         row,
                         lane_count,
                         commit,
                         commit_idx,
                         &position_id,
+                        widths,
                         appearance,
                     );
                     let is_selected = selected == Some(commit_idx);
@@ -1959,7 +1971,7 @@ impl GitGraphView {
         // `render_commit_text`) so the subject text clips before it rather than
         // under it.
         let theme = appearance.theme();
-        Scrollable::vertical(
+        let scrollable = Scrollable::vertical(
             self.commit_scroll_state.clone(),
             list,
             ScrollbarWidth::Auto,
@@ -1968,7 +1980,18 @@ impl GitGraphView {
             Fill::None,
         )
         .with_overlayed_scrollbar()
-        .finish()
+        .finish();
+        // The column header stays put above the scrolling rows. The caller wraps
+        // this in `Expanded`, so the column gets a bounded height.
+        Flex::column()
+            .with_main_axis_size(MainAxisSize::Max)
+            .with_child(columns::render_column_header(
+                &self.refs_column_state,
+                &self.graph_column_state,
+                appearance,
+            ))
+            .with_child(Expanded::new(1.0, scrollable).finish())
+            .finish()
     }
 
     /// Wraps the detail area in a height-draggable [`Resizable`] (drag the top
@@ -3351,153 +3374,8 @@ fn render_centered_placeholder(
     Shrinkable::new(1.0, Align::new(content.finish()).finish()).finish()
 }
 
-/// Renders a single graph row: the lane drawing on the left + the commit text on
-/// the right. `index` and `position_id` let the ref badges open their context
-/// menu.
-/// Renders the synthetic "uncommitted changes" row: a hollow graph node plus an
-/// "Uncommitted Changes (N)" label.
-fn render_uncommitted_row(
-    row: &GraphRow,
-    lane_count: usize,
-    count: usize,
-    appearance: &Appearance,
-) -> Box<dyn Element> {
-    let theme = appearance.theme();
-    let label = format!("Uncommitted Changes ({count})");
-    Flex::row()
-        .with_main_axis_size(MainAxisSize::Max)
-        .with_cross_axis_alignment(CrossAxisAlignment::Center)
-        .with_child(GitGraphRowCanvas::new(row.clone(), lane_count, true).finish())
-        .with_child(
-            Expanded::new(
-                1.0,
-                Container::new(
-                    Text::new_inline(
-                        label,
-                        appearance.ui_font_family(),
-                        appearance.ui_font_size(),
-                    )
-                    .with_color(theme.foreground().into())
-                    .with_clip(ClipConfig::ellipsis())
-                    .finish(),
-                )
-                .with_padding_left(6.)
-                .finish(),
-            )
-            .finish(),
-        )
-        .finish()
-}
-
-fn render_graph_row(
-    row: &GraphRow,
-    lane_count: usize,
-    commit: &CommitNode,
-    index: usize,
-    position_id: &str,
-    appearance: &Appearance,
-) -> Box<dyn Element> {
-    // The HEAD "you are here" marker now sits to the left of the current
-    // branch's pill (see `render_ref_badge`), so every real commit on the
-    // graph draws a plain filled dot — only the synthetic uncommitted row is
-    // hollow.
-    Flex::row()
-        .with_main_axis_size(MainAxisSize::Max)
-        .with_cross_axis_alignment(CrossAxisAlignment::Center)
-        .with_child(GitGraphRowCanvas::new(row.clone(), lane_count, false).finish())
-        .with_child(
-            Expanded::new(
-                1.0,
-                render_commit_text(commit, index, position_id, appearance),
-            )
-            .finish(),
-        )
-        .finish()
-}
-
-/// Renders the commit text column: short hash + ref labels + subject. `index` /
-/// `position_id` thread through to the ref badges' right-click menus.
-fn render_commit_text(
-    commit: &CommitNode,
-    index: usize,
-    position_id: &str,
-    appearance: &Appearance,
-) -> Box<dyn Element> {
-    let theme = appearance.theme();
-    let font = appearance.ui_font_family();
-    let size = appearance.ui_font_size();
-    let dim = theme.sub_text_color(theme.background());
-    let fg = theme.foreground();
-
-    let mut row = Flex::row()
-        .with_main_axis_size(MainAxisSize::Max)
-        .with_cross_axis_alignment(CrossAxisAlignment::Center);
-
-    // Stash rows are identified by their `stash@{n}` badge, not a hash, so they
-    // omit the hash column. Every real commit shows its short hash, which carries
-    // its own right-click menu (copy the 8-char hash), mirroring the ref badges:
-    // its handler sits above the row's commit menu so a right-click on the hash
-    // copies exactly what's shown rather than the commit menu's full hash.
-    if !super::data::is_stash_node(commit) {
-        let position_id = position_id.to_string();
-        let hash_label = Container::new(
-            Text::new_inline(
-                commit.short_hash.clone(),
-                appearance.monospace_font_family(),
-                size,
-            )
-            .with_color(dim.into())
-            .finish(),
-        )
-        .with_padding_right(8.)
-        .finish();
-        let short_hash = Hoverable::new(MouseStateHandle::default(), move |_| hash_label)
-            .on_right_click(move |ctx, _app, position| {
-                let Some(bounds) = ctx.element_position_by_id(&position_id) else {
-                    return;
-                };
-                let offset = position - bounds.origin();
-                ctx.dispatch_typed_action(GitGraphAction::OpenMenu {
-                    kind: MenuKind::ShortHash { index },
-                    x: offset.x(),
-                    y: offset.y(),
-                });
-            })
-            .finish();
-        row = row.with_child(short_hash);
-    }
-
-    for ref_label in &commit.refs {
-        row = row.with_child(render_ref_badge(
-            ref_label,
-            Some((index, position_id)),
-            appearance,
-        ));
-    }
-
-    // The subject takes the remaining width and ellipsis-clips, so a long
-    // message ends with "…" rather than overflowing under the overlay scrollbar.
-    row = row.with_child(
-        Expanded::new(
-            1.0,
-            Text::new_inline(commit.subject.clone(), font, size)
-                .with_color(fg.into())
-                .with_clip(ClipConfig::ellipsis())
-                .finish(),
-        )
-        .finish(),
-    );
-
-    // Reserve the overlay scrollbar's width on the right (it floats over the
-    // content) so the clipped subject stays clear of it.
-    Container::new(row.finish())
-        .with_padding_left(6.)
-        .with_padding_right(ScrollbarWidth::Auto.as_f32() + 6.)
-        .finish()
-}
-
 /// Badge color for a ref label (by kind).
-fn ref_badge_color(kind: RefKind) -> ColorU {
+pub(super) fn ref_badge_color(kind: RefKind) -> ColorU {
     match kind {
         RefKind::Head => ColorU {
             r: 0x4e,
@@ -3536,7 +3414,7 @@ fn ref_badge_color(kind: RefKind) -> ColorU {
 /// the branch it points at — it gets the local-branch menu flagged as the
 /// current branch (so self-only operations like delete / merge-into-current are
 /// omitted).
-fn ref_menu_kind(kind: RefKind, name: String, index: usize) -> MenuKind {
+pub(super) fn ref_menu_kind(kind: RefKind, name: String, index: usize) -> MenuKind {
     match kind {
         RefKind::Tag => MenuKind::Tag { index, name },
         RefKind::RemoteBranch => MenuKind::RemoteBranch { index, name },
