@@ -200,3 +200,37 @@ fn relative_time_covers_every_range() {
     assert_eq!(relative_time(65 * 86_400), "2 months ago");
     assert_eq!(relative_time(800 * 86_400), "2 years ago");
 }
+
+#[test]
+fn nested_file_tree_rows_lay_out() {
+    super::super::test_support::lay_out(|appearance| {
+        Flex::column()
+            .with_child(render_file_tree_row(
+                Some(true),
+                Icon::Folder,
+                None,
+                "src",
+                0,
+                None,
+                1,
+                1,
+                MouseStateHandle::default(),
+                GitGraphAction::ToggleDir("src".into()),
+                appearance,
+            ))
+            .with_child(render_file_tree_row(
+                None,
+                Icon::File,
+                Some(FileStatus::Added),
+                "deep.rs",
+                3,
+                Some((5, 0)),
+                1,
+                1,
+                MouseStateHandle::default(),
+                GitGraphAction::OpenFileDiff(0),
+                appearance,
+            ))
+            .finish()
+    });
+}

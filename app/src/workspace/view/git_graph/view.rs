@@ -79,6 +79,8 @@ const DETAIL_HASH_CHIPS: usize = 5;
 /// Per-depth horizontal indent (px) of rows in the detail area's file tree
 /// (matches the Project Explorer's folder indent).
 const FILE_TREE_INDENT: f32 = 16.;
+/// Fixed so each row's indent guides meet the next row's and draw as continuous lines.
+const FILE_TREE_ROW_HEIGHT: f32 = 22.;
 /// Size (px) of the disclosure chevron / type icon columns on each file-tree row.
 const FILE_TREE_ICON_SIZE: f32 = 16.;
 
@@ -4114,6 +4116,26 @@ fn render_status_badge(status: FileStatus, appearance: &Appearance) -> Box<dyn E
     .finish()
 }
 
+/// One indent level of the file tree: a thin vertical line, full row height.
+fn render_indent_guide(appearance: &Appearance) -> Box<dyn Element> {
+    ConstrainedBox::new(
+        Container::new(
+            Container::new(
+                ConstrainedBox::new(Empty::new().finish())
+                    .with_width(1.)
+                    .with_height(FILE_TREE_ROW_HEIGHT)
+                    .finish(),
+            )
+            .with_background(appearance.theme().outline())
+            .finish(),
+        )
+        .with_padding_left((FILE_TREE_ICON_SIZE - 1.) / 2.)
+        .finish(),
+    )
+    .with_width(FILE_TREE_INDENT)
+    .finish()
+}
+
 /// Renders one clickable row of the detail file tree, in the same form as the
 /// Project Explorer: the depth indent + a disclosure chevron column (down =
 /// expanded, right = collapsed; empty for a file leaf) + a type icon (folder for
@@ -4194,12 +4216,10 @@ fn render_file_tree_row(
         let mut row = Flex::row()
             .with_main_axis_size(MainAxisSize::Max)
             .with_cross_axis_alignment(CrossAxisAlignment::Center);
-        if depth > 0 {
-            row = row.with_child(
-                ConstrainedBox::new(Empty::new().finish())
-                    .with_width(depth as f32 * FILE_TREE_INDENT)
-                    .finish(),
-            );
+        // One guide per ancestor level, centered under that ancestor's chevron. Rows are in
+        // tree order, so a level's guides run exactly through its folder's contents.
+        for _ in 0..depth {
+            row = row.with_child(render_indent_guide(appearance));
         }
         row = row.with_child(chevron_col);
         match status {
@@ -4221,7 +4241,10 @@ fn render_file_tree_row(
         }
         let row = row.finish();
 
-        let mut container = Container::new(row).with_vertical_padding(2.);
+        let row = ConstrainedBox::new(row)
+            .with_height(FILE_TREE_ROW_HEIGHT)
+            .finish();
+        let mut container = Container::new(row);
         if let Some(bg) = highlight.background_color(appearance) {
             container = container.with_background_color(bg.into_solid());
         }
