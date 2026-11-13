@@ -12,7 +12,7 @@ fn add_tag_lightweight_omits_annotation_flags() {
         name: "v1.0".into(),
         message: None,
     };
-    assert_eq!(op.args(), vec!["tag", "v1.0", "abc123"]);
+    assert_eq!(op.args(), vec!["tag", "--end-of-options", "v1.0", "abc123"]);
 }
 
 #[test]
@@ -24,7 +24,15 @@ fn add_tag_annotated_uses_dash_a_and_message() {
     };
     assert_eq!(
         op.args(),
-        vec!["tag", "-a", "v1.0", "-m", "first release", "abc123"]
+        vec![
+            "tag",
+            "-a",
+            "-m",
+            "first release",
+            "--end-of-options",
+            "v1.0",
+            "abc123"
+        ]
     );
 }
 
@@ -34,7 +42,10 @@ fn create_branch_passes_name_then_hash() {
         hash: "deadbeef".into(),
         name: "feature/x".into(),
     };
-    assert_eq!(op.args(), vec!["branch", "feature/x", "deadbeef"]);
+    assert_eq!(
+        op.args(),
+        vec!["branch", "--end-of-options", "feature/x", "deadbeef"]
+    );
 }
 
 #[test]
@@ -71,7 +82,10 @@ fn delete_remote_branch_uses_push_delete() {
         remote: "origin".into(),
         branch: "feature".into(),
     };
-    assert_eq!(op.args(), vec!["push", "origin", "--delete", "feature"]);
+    assert_eq!(
+        op.args(),
+        vec!["push", "origin", "--delete", "refs/heads/feature"]
+    );
 }
 
 #[test]
@@ -80,7 +94,7 @@ fn pull_passes_remote_and_branch_separately() {
         remote: "origin".into(),
         branch: "main".into(),
     };
-    assert_eq!(op.args(), vec!["pull", "origin", "main"]);
+    assert_eq!(op.args(), vec!["pull", "origin", "refs/heads/main"]);
 }
 
 #[test]
@@ -89,7 +103,10 @@ fn rename_branch_uses_branch_dash_m() {
         old: "old".into(),
         new: "new".into(),
     };
-    assert_eq!(op.args(), vec!["branch", "-m", "old", "new"]);
+    assert_eq!(
+        op.args(),
+        vec!["branch", "-m", "--end-of-options", "old", "new"]
+    );
 }
 
 #[test]
@@ -98,7 +115,10 @@ fn delete_local_branch_uses_branch_dash_d() {
         name: "feature".into(),
         force: false,
     };
-    assert_eq!(op.args(), vec!["branch", "-d", "feature"]);
+    assert_eq!(
+        op.args(),
+        vec!["branch", "-d", "--end-of-options", "feature"]
+    );
 }
 
 #[test]
@@ -107,7 +127,10 @@ fn delete_local_branch_force_uses_capital_d() {
         name: "feature".into(),
         force: true,
     };
-    assert_eq!(op.args(), vec!["branch", "-D", "feature"]);
+    assert_eq!(
+        op.args(),
+        vec!["branch", "-D", "--end-of-options", "feature"]
+    );
 }
 
 #[test]
@@ -145,7 +168,7 @@ fn push_branch_force_uses_force_with_lease() {
         branch: "main".into(),
         force: false,
     };
-    assert_eq!(unforced.args(), vec!["push", "origin", "main"]);
+    assert_eq!(unforced.args(), vec!["push", "origin", "refs/heads/main"]);
     // Branch force uses --force-with-lease so a moved remote is not clobbered.
     let forced = GitWriteOp::PushBranch {
         remote: "origin".into(),
@@ -154,7 +177,7 @@ fn push_branch_force_uses_force_with_lease() {
     };
     assert_eq!(
         forced.args(),
-        vec!["push", "--force-with-lease", "origin", "main"]
+        vec!["push", "--force-with-lease", "origin", "refs/heads/main"]
     );
 }
 
@@ -165,14 +188,17 @@ fn push_tag_force_uses_plain_force() {
         name: "v1".into(),
         force: false,
     };
-    assert_eq!(unforced.args(), vec!["push", "origin", "v1"]);
+    assert_eq!(unforced.args(), vec!["push", "origin", "refs/tags/v1"]);
     // Tags have no remote-tracking ref to lease against, so force is bare --force.
     let forced = GitWriteOp::PushTag {
         remote: "origin".into(),
         name: "v1".into(),
         force: true,
     };
-    assert_eq!(forced.args(), vec!["push", "--force", "origin", "v1"]);
+    assert_eq!(
+        forced.args(),
+        vec!["push", "--force", "origin", "refs/tags/v1"]
+    );
 }
 
 #[test]
@@ -275,7 +301,13 @@ fn stash_ops_build_expected_args() {
             name: "feature".into(),
         }
         .args(),
-        vec!["stash", "branch", "feature", "stash@{0}"]
+        vec![
+            "stash",
+            "branch",
+            "--end-of-options",
+            "feature",
+            "stash@{0}"
+        ]
     );
 }
 
@@ -354,13 +386,13 @@ fn rebase_onto_branch_passes_branch_name() {
     let op = GitWriteOp::RebaseOntoBranch {
         branch: "main".into(),
     };
-    assert_eq!(op.args(), vec!["rebase", "main"]);
+    assert_eq!(op.args(), vec!["rebase", "--end-of-options", "main"]);
 }
 
 #[test]
 fn delete_tag_uses_dash_d() {
     let op = GitWriteOp::DeleteTag { name: "v1".into() };
-    assert_eq!(op.args(), vec!["tag", "-d", "v1"]);
+    assert_eq!(op.args(), vec!["tag", "-d", "--end-of-options", "v1"]);
 }
 
 #[test]
@@ -372,7 +404,15 @@ fn archive_includes_format_and_output() {
     };
     assert_eq!(
         op.args(),
-        vec!["archive", "--format", "zip", "-o", "/tmp/out.zip", "main"]
+        vec![
+            "archive",
+            "--format",
+            "zip",
+            "-o",
+            "/tmp/out.zip",
+            "--end-of-options",
+            "main"
+        ]
     );
 }
 
@@ -438,5 +478,143 @@ fn confirm_message_present_for_destructive_absent_for_input_ops() {
         .confirm_message()
         .unwrap()
         .contains("cannot be undone")
+    );
+}
+
+/// A ref named like an option (valid in git, and fetchable from a remote) must
+/// never reach git as a positional argument: `--receive-pack=` / `--upload-pack=`
+/// make `git push` / `git pull` run an arbitrary command.
+#[test]
+fn validate_rejects_option_like_operands() {
+    let hostile = "--receive-pack=touch${IFS}pwned;git-receive-pack";
+    let ops = [
+        GitWriteOp::PushTag {
+            remote: "origin".into(),
+            name: hostile.into(),
+            force: false,
+        },
+        GitWriteOp::Pull {
+            remote: "origin".into(),
+            branch: hostile.into(),
+        },
+        GitWriteOp::DeleteRemoteBranch {
+            remote: "origin".into(),
+            branch: hostile.into(),
+        },
+        GitWriteOp::PushBranch {
+            remote: hostile.into(),
+            branch: "main".into(),
+            force: false,
+        },
+        GitWriteOp::CheckoutBranch {
+            branch: hostile.into(),
+            force: false,
+        },
+        GitWriteOp::DeleteTag {
+            name: hostile.into(),
+        },
+        GitWriteOp::Archive {
+            rev: hostile.into(),
+            output: PathBuf::from("/tmp/out.zip"),
+            format: ArchiveFormat::Zip,
+        },
+        GitWriteOp::Merge {
+            rev: hostile.into(),
+        },
+        GitWriteOp::RebaseOntoBranch {
+            branch: hostile.into(),
+        },
+        GitWriteOp::DeleteLocalBranch {
+            name: hostile.into(),
+            force: false,
+        },
+        GitWriteOp::RenameBranch {
+            old: "ok".into(),
+            new: hostile.into(),
+        },
+        GitWriteOp::AddTag {
+            hash: "abc123".into(),
+            name: hostile.into(),
+            message: None,
+        },
+        GitWriteOp::CreateBranch {
+            hash: "abc123".into(),
+            name: hostile.into(),
+        },
+        GitWriteOp::StashBranch {
+            selector: "stash@{0}".into(),
+            name: hostile.into(),
+        },
+        GitWriteOp::StashDrop {
+            selector: hostile.into(),
+        },
+        GitWriteOp::Reset {
+            hash: hostile.into(),
+            mode: ResetMode::Hard,
+        },
+    ];
+    for op in ops {
+        assert!(op.validate().is_err(), "should reject: {op:?}");
+    }
+}
+
+#[test]
+fn validate_rejects_empty_operands() {
+    let op = GitWriteOp::DeleteTag {
+        name: String::new(),
+    };
+    assert!(op.validate().is_err());
+}
+
+#[test]
+fn validate_accepts_ordinary_operands_and_option_values() {
+    let ops = [
+        GitWriteOp::PushTag {
+            remote: "origin".into(),
+            name: "v1.0".into(),
+            force: true,
+        },
+        GitWriteOp::Pull {
+            remote: "origin".into(),
+            branch: "feat/x".into(),
+        },
+        // A message is an option value (`-m <msg>`), so a leading dash is fine.
+        GitWriteOp::AddTag {
+            hash: "abc123".into(),
+            name: "v2".into(),
+            message: Some("- bullet notes".into()),
+        },
+        GitWriteOp::Stash {
+            message: Some("--wip".into()),
+            include_untracked: true,
+        },
+        GitWriteOp::CleanUntracked { directories: true },
+    ];
+    for op in ops {
+        assert_eq!(op.validate(), Ok(()), "should accept: {op:?}");
+    }
+}
+
+/// Remote-sourced names reach `git push` / `git pull` fully qualified, so even
+/// without `validate` they can't be parsed as options (`--end-of-options` does
+/// not protect `git pull`, which forwards its refspec to `fetch` unguarded).
+#[test]
+fn remote_sourced_refs_are_fully_qualified() {
+    let pull = GitWriteOp::Pull {
+        remote: "origin".into(),
+        branch: "-x".into(),
+    };
+    assert_eq!(
+        pull.args().last().map(String::as_str),
+        Some("refs/heads/-x")
+    );
+    let push_tag = GitWriteOp::PushTag {
+        remote: "origin".into(),
+        name: "-x".into(),
+        force: false,
+    };
+    assert_eq!(
+        push_tag.args().last().map(String::as_str),
+        Some("refs/tags/-x")
     );
 }

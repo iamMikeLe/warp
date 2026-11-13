@@ -81,6 +81,25 @@ pub(crate) fn split_remote_ref(display_name: &str) -> (String, String) {
     }
 }
 
+/// Ends option parsing so a following ref or name is never read as a flag.
+/// Supported by parse-options git commands since git 2.24. `git checkout` and
+/// `git pull` don't honor it (checkout treats it as the start of pathspecs, pull
+/// forwards its refspec to `fetch` unguarded), so those ops rely on fully
+/// qualified refs and [`GitWriteOp::validate`] instead.
+const END_OF_OPTIONS: &str = "--end-of-options";
+
+/// `refs/heads/<branch>`: a fully qualified branch ref can't start with `-`, so
+/// a hostile branch name from a remote (e.g. `--upload-pack=<cmd>`) can't be
+/// parsed by `git push` / `git pull` as an option.
+fn qualified_branch(branch: &str) -> String {
+    format!("refs/heads/{branch}")
+}
+
+/// `refs/tags/<name>`; see [`qualified_branch`].
+fn qualified_tag(name: &str) -> String {
+    format!("refs/tags/{name}")
+}
+
 /// A fully-specified, ready-to-run mutating git operation. The UI builds one of
 /// these once it has all the inputs it needs (text from a prompt dialog, a mode
 /// from the reset submenu, a path from the save dialog), then runs it through
@@ -187,7 +206,12 @@ impl GitWriteOp {
                 hash,
                 name,
                 message: None,
-            } => vec!["tag".into(), name.clone(), hash.clone()],
+            } => vec![
+                "tag".into(),
+                END_OF_OPTIONS.into(),
+                name.clone(),
+                hash.clone(),
+            ],
             GitWriteOp::AddTag {
                 hash,
                 name,
@@ -195,13 +219,19 @@ impl GitWriteOp {
             } => vec![
                 "tag".into(),
                 "-a".into(),
-                name.clone(),
                 "-m".into(),
                 msg.clone(),
+                END_OF_OPTIONS.into(),
+                name.clone(),
                 hash.clone(),
             ],
             GitWriteOp::CreateBranch { hash, name } => {
-                vec!["branch".into(), name.clone(), hash.clone()]
+                vec![
+                    "branch".into(),
+                    END_OF_OPTIONS.into(),
+                    name.clone(),
+                    hash.clone(),
+                ]
             }
             GitWriteOp::CheckoutCommit { hash, force } => {
                 let mut args = vec!["checkout".into()];
@@ -221,9 +251,15 @@ impl GitWriteOp {
                 format!("{hash}^"),
                 hash.clone(),
             ],
-            GitWriteOp::Merge { rev } => vec!["merge".into(), rev.clone()],
-            GitWriteOp::Rebase { hash } => vec!["rebase".into(), hash.clone()],
-            GitWriteOp::RebaseOntoBranch { branch } => vec!["rebase".into(), branch.clone()],
+            GitWriteOp::Merge { rev } => {
+                vec!["merge".into(), END_OF_OPTIONS.into(), rev.clone()]
+            }
+            GitWriteOp::Rebase { hash } => {
+                vec!["rebase".into(), END_OF_OPTIONS.into(), hash.clone()]
+            }
+            GitWriteOp::RebaseOntoBranch { branch } => {
+                vec!["rebase".into(), END_OF_OPTIONS.into(), branch.clone()]
+            }
             GitWriteOp::Reset { hash, mode } => {
                 vec!["reset".into(), mode.flag().into(), hash.clone()]
             }
@@ -257,6 +293,7 @@ impl GitWriteOp {
             GitWriteOp::StashBranch { selector, name } => vec![
                 "stash".into(),
                 "branch".into(),
+                END_OF_OPTIONS.into(),
                 name.clone(),
                 selector.clone(),
             ],
@@ -272,17 +309,28 @@ impl GitWriteOp {
                 "push".into(),
                 remote.clone(),
                 "--delete".into(),
-                branch.clone(),
+                qualified_branch(branch),
             ],
             GitWriteOp::Pull { remote, branch } => {
-                vec!["pull".into(), remote.clone(), branch.clone()]
+                vec!["pull".into(), remote.clone(), qualified_branch(branch)]
             }
             GitWriteOp::RenameBranch { old, new } => {
-                vec!["branch".into(), "-m".into(), old.clone(), new.clone()]
+                vec![
+                    "branch".into(),
+                    "-m".into(),
+                    END_OF_OPTIONS.into(),
+                    old.clone(),
+                    new.clone(),
+                ]
             }
             GitWriteOp::DeleteLocalBranch { name, force } => {
                 let flag = if *force { "-D" } else { "-d" };
-                vec!["branch".into(), flag.into(), name.clone()]
+                vec![
+                    "branch".into(),
+                    flag.into(),
+                    END_OF_OPTIONS.into(),
+                    name.clone(),
+                ]
             }
             GitWriteOp::PushBranch {
                 remote,
@@ -294,10 +342,15 @@ impl GitWriteOp {
                     args.push("--force-with-lease".into());
                 }
                 args.push(remote.clone());
-                args.push(branch.clone());
+                args.push(qualified_branch(branch));
                 args
             }
-            GitWriteOp::DeleteTag { name } => vec!["tag".into(), "-d".into(), name.clone()],
+            GitWriteOp::DeleteTag { name } => vec![
+                "tag".into(),
+                "-d".into(),
+                END_OF_OPTIONS.into(),
+                name.clone(),
+            ],
             GitWriteOp::PushTag {
                 remote,
                 name,
@@ -308,7 +361,7 @@ impl GitWriteOp {
                     args.push("--force".into());
                 }
                 args.push(remote.clone());
-                args.push(name.clone());
+                args.push(qualified_tag(name));
                 args
             }
             GitWriteOp::Archive {
@@ -321,8 +374,77 @@ impl GitWriteOp {
                 format.name().into(),
                 "-o".into(),
                 output.to_string_lossy().into_owned(),
+                END_OF_OPTIONS.into(),
                 rev.clone(),
             ],
+        }
+    }
+
+    /// Every ref, name, remote, hash, or stash selector this op hands git as a
+    /// positional argument. Option values (`-m <message>`, `-o <path>`) are
+    /// excluded: git always reads those as values.
+    fn operands(&self) -> Vec<&str> {
+        match self {
+            GitWriteOp::AddTag { hash, name, .. } | GitWriteOp::CreateBranch { hash, name } => {
+                vec![name, hash]
+            }
+            GitWriteOp::CheckoutCommit { hash, .. }
+            | GitWriteOp::CherryPick { hash }
+            | GitWriteOp::Revert { hash }
+            | GitWriteOp::DropCommit { hash }
+            | GitWriteOp::Rebase { hash }
+            | GitWriteOp::Reset { hash, .. } => vec![hash],
+            GitWriteOp::Merge { rev } | GitWriteOp::Archive { rev, .. } => vec![rev],
+            GitWriteOp::RebaseOntoBranch { branch } | GitWriteOp::CheckoutBranch { branch, .. } => {
+                vec![branch]
+            }
+            GitWriteOp::CleanUntracked { .. } | GitWriteOp::Stash { .. } => vec![],
+            GitWriteOp::StashApply { selector }
+            | GitWriteOp::StashPop { selector }
+            | GitWriteOp::StashDrop { selector } => vec![selector],
+            GitWriteOp::StashBranch { selector, name } => vec![name, selector],
+            GitWriteOp::DeleteRemoteBranch { remote, branch }
+            | GitWriteOp::Pull { remote, branch }
+            | GitWriteOp::PushBranch { remote, branch, .. } => vec![remote, branch],
+            GitWriteOp::RenameBranch { old, new } => vec![old, new],
+            GitWriteOp::DeleteLocalBranch { name, .. } | GitWriteOp::DeleteTag { name } => {
+                vec![name]
+            }
+            GitWriteOp::PushTag { remote, name, .. } => vec![remote, name],
+        }
+    }
+
+    /// Refuses an op whose positional arguments could be parsed as git options.
+    /// Refs, tags, and remote branches can arrive from a remote with names like
+    /// `--receive-pack=<cmd>` (valid ref names), which several git commands would
+    /// otherwise treat as an option that runs a command. This is the backstop for
+    /// every op, including those where [`END_OF_OPTIONS`] isn't honored.
+    #[cfg_attr(target_family = "wasm", allow(dead_code))]
+    pub(crate) fn validate(&self) -> std::result::Result<(), String> {
+        for operand in self.operands() {
+            if operand.is_empty() {
+                return Err("Refusing to run git with an empty name.".to_string());
+            }
+            if operand.starts_with('-') {
+                return Err(format!(
+                    "Refusing to run git: \"{operand}\" starts with \"-\" and could be read as an option."
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Names the user typed that git will create, as `(name, is_branch)`; checked
+    /// with `git check-ref-format` before running.
+    #[cfg_attr(target_family = "wasm", allow(dead_code))]
+    fn new_ref_names(&self) -> Vec<(&str, bool)> {
+        match self {
+            GitWriteOp::AddTag { name, .. } => vec![(name, false)],
+            GitWriteOp::CreateBranch { name, .. } | GitWriteOp::StashBranch { name, .. } => {
+                vec![(name, true)]
+            }
+            GitWriteOp::RenameBranch { new, .. } => vec![(new, true)],
+            _ => vec![],
         }
     }
 
@@ -467,6 +589,21 @@ impl GitWriteOp {
 /// caller (a reload on success, an error banner on failure).
 #[cfg(not(target_family = "wasm"))]
 pub(crate) async fn run_write_op(repo_root: &Path, op: &GitWriteOp) -> Result<()> {
+    op.validate().map_err(anyhow::Error::msg)?;
+    for (name, is_branch) in op.new_ref_names() {
+        // `validate` already rejected a leading `-`, so `name` can't be taken as
+        // an option here either.
+        let check = if is_branch {
+            warp_util::git::run_git_command(repo_root, &["check-ref-format", "--branch", name])
+                .await
+        } else {
+            let full = qualified_tag(name);
+            warp_util::git::run_git_command(repo_root, &["check-ref-format", full.as_str()]).await
+        };
+        if check.is_err() {
+            anyhow::bail!("\"{name}\" is not a valid git ref name.");
+        }
+    }
     let args = op.args();
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     warp_util::git::run_git_command(repo_root, &arg_refs).await?;
