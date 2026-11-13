@@ -34,6 +34,10 @@ const MIN_CONNECTOR: f32 = 10.0;
 const ROW_TINT_ALPHA: u8 = 0x1c;
 const HEADER_HEIGHT: f32 = 24.0;
 const CELL_PADDING: f32 = 6.0;
+/// Upper bound on a ref pill's width. Besides keeping long names tidy, it gives the pill's
+/// shrinkable name a bounded width in parents that lay children out unbounded (e.g. `Wrap`),
+/// which a flex with flexible children requires.
+const MAX_PILL_WIDTH: f32 = 280.0;
 
 /// Column widths for one frame, read from the header's resizable states.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -221,12 +225,16 @@ pub(super) fn ref_pill(
         )
         .finish(),
     );
-    Container::new(content.finish())
-        .with_background_color(bg)
-        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(3.)))
-        .with_horizontal_padding(5.)
-        .with_vertical_padding(2.)
-        .finish()
+    ConstrainedBox::new(
+        Container::new(content.finish())
+            .with_background_color(bg)
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(3.)))
+            .with_horizontal_padding(5.)
+            .with_vertical_padding(2.)
+            .finish(),
+    )
+    .with_max_width(MAX_PILL_WIDTH)
+    .finish()
 }
 
 /// The row's ref pill in its commit's lane color, with the ref's right-click menu.

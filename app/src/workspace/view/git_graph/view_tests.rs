@@ -157,3 +157,46 @@ fn summary_multi_selection_joins_in_list_order() {
     ]);
     assert_eq!(branch_summary_text(&branches, &selected), "main, feature");
 }
+
+/// The commit details' new elements in the parents they're laid out in; a layout panic fails.
+#[test]
+fn detail_elements_lay_out() {
+    super::super::test_support::lay_out(|appearance| {
+        let commit = CommitNode {
+            hash: "0123456789abcdef".into(),
+            short_hash: "01234567".into(),
+            parents: vec!["aaaaaaaaaaaa".into(), "bbbbbbbbbbbb".into()],
+            author_name: "Ada Lovelace".into(),
+            author_email: "ada@example.com".into(),
+            author_time: 0,
+            subject: "Merge".into(),
+            body_preview: String::new(),
+            refs: Vec::new(),
+        };
+        let states: Vec<MouseStateHandle> = (0..DETAIL_HASH_CHIPS)
+            .map(|_| MouseStateHandle::default())
+            .collect();
+        Flex::column()
+            .with_child(with_avatar(
+                &commit.author_name,
+                &commit.author_email,
+                22.,
+                Empty::new().finish(),
+                appearance,
+            ))
+            .with_child(render_hash_chips(&commit, &states, appearance))
+            .with_child(render_change_bar(3, 1, appearance))
+            .with_child(render_status_badge(FileStatus::Renamed, appearance))
+            .finish()
+    });
+}
+
+#[test]
+fn relative_time_covers_every_range() {
+    assert_eq!(relative_time(5), "just now");
+    assert_eq!(relative_time(60), "1 minute ago");
+    assert_eq!(relative_time(7_200), "2 hours ago");
+    assert_eq!(relative_time(3 * 86_400), "3 days ago");
+    assert_eq!(relative_time(65 * 86_400), "2 months ago");
+    assert_eq!(relative_time(800 * 86_400), "2 years ago");
+}

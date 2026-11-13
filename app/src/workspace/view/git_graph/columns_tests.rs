@@ -81,3 +81,62 @@ fn remote_primary_does_not_fold_anything() {
     assert_eq!(primary.tracked_remote, None);
     assert_eq!(primary.hidden, 1);
 }
+
+/// Regression: the commit details lay ref pills out in a `Wrap`, which gives each child an
+/// unbounded width; the pill's shrinkable name must not need a bounded parent.
+#[test]
+fn ref_pill_lays_out_in_an_unbounded_wrap() {
+    super::super::test_support::lay_out(|appearance| {
+        let label = RefLabel {
+            kind: RefKind::LocalBranch,
+            name: "feature/a-very-long-branch-name-that-needs-an-ellipsis".into(),
+        };
+        warpui::elements::Wrap::row()
+            .with_children([ref_pill(&label, true, lane_color(1), appearance)])
+            .finish()
+    });
+}
+
+#[test]
+fn commit_row_lays_out_with_refs_and_body() {
+    super::super::test_support::lay_out(|appearance| {
+        let commit = CommitNode {
+            hash: "abc".into(),
+            short_hash: "abc".into(),
+            parents: vec!["def".into()],
+            author_name: "Ada Lovelace".into(),
+            author_email: "ada@example.com".into(),
+            author_time: 0,
+            subject: "feat: a subject".into(),
+            body_preview: "a body".into(),
+            refs: vec![
+                RefLabel {
+                    kind: RefKind::Head,
+                    name: "main".into(),
+                },
+                RefLabel {
+                    kind: RefKind::RemoteBranch,
+                    name: "origin/main".into(),
+                },
+                RefLabel {
+                    kind: RefKind::Tag,
+                    name: "v1".into(),
+                },
+            ],
+        };
+        let layout = super::super::layout::assign_lanes(std::slice::from_ref(&commit));
+        let widths = ColumnWidths {
+            refs: DEFAULT_REFS_WIDTH,
+            graph: DEFAULT_GRAPH_WIDTH,
+        };
+        render_commit_row(
+            &layout.rows[0],
+            layout.max_lanes,
+            &commit,
+            0,
+            "pos",
+            widths,
+            appearance,
+        )
+    });
+}
