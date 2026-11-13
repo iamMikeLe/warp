@@ -1753,6 +1753,7 @@ fn render_vertical_tabs_panel(
 
     Resizable::new(state.resizable_state.clone(), inner)
         .with_dragbar_side(drag_side)
+        .with_dragbar_hover_color(internal_colors::fg_overlay_5(theme).into())
         .on_resize(|ctx, _| {
             ctx.notify();
         })
