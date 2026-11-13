@@ -23,7 +23,7 @@ pub fn auth_secret_types_for_harness(harness: Harness) -> &'static [AuthSecretTy
     match harness {
         Harness::Claude => &CLAUDE_AUTH_SECRET_TYPES,
         Harness::Codex => &CODEX_AUTH_SECRET_TYPES,
-        _ => &[],
+        Harness::Oz | Harness::OpenCode | Harness::Gemini | Harness::Pi | Harness::Unknown => &[],
     }
 }
 
@@ -31,14 +31,17 @@ pub fn learn_more_url_for_harness(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => CLAUDE_LEARN_MORE_URL,
         Harness::Codex => CODEX_LEARN_MORE_URL,
-        _ => DEFAULT_LEARN_MORE_URL,
+        Harness::Oz | Harness::OpenCode | Harness::Gemini | Harness::Pi | Harness::Unknown => {
+            DEFAULT_LEARN_MORE_URL
+        }
     }
 }
 
-const DEFAULT_LEARN_MORE_URL: &str =
-    "https://docs.warp.dev/agent-platform/cloud-agents/harnesses/authentication/";
-const CODEX_LEARN_MORE_URL: &str = "https://docs.warp.dev/agent-platform/cloud-agents/harnesses/authentication/#connecting-codex-credentials";
-const CLAUDE_LEARN_MORE_URL: &str = "https://docs.warp.dev/agent-platform/cloud-agents/harnesses/authentication/#connecting-claude-code-credentials";
+const DEFAULT_LEARN_MORE_URL: &str = "https://docs.warp.dev/platform/harnesses/authentication/";
+const CODEX_LEARN_MORE_URL: &str =
+    "https://docs.warp.dev/platform/harnesses/authentication/#connecting-codex-credentials";
+const CLAUDE_LEARN_MORE_URL: &str =
+    "https://docs.warp.dev/platform/harnesses/authentication/#connecting-claude-code-credentials";
 
 pub fn build_managed_secret_value(
     info: &AuthSecretTypeInfo,
@@ -89,7 +92,11 @@ pub fn build_managed_secret_value(
                 base_url,
             ))
         }
-        ManagedSecretType::RawValue | ManagedSecretType::Dotenvx => Err(anyhow!(
+        ManagedSecretType::RawValue
+        | ManagedSecretType::LlmProviderApiKey
+        | ManagedSecretType::Dotenvx
+        | ManagedSecretType::DockerRegistry
+        | ManagedSecretType::AwsEcrCredential => Err(anyhow!(
             "Auth secret type {:?} is not supported via the harness FTUX flow",
             info.secret_type
         )),

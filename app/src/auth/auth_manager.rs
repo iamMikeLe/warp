@@ -1,8 +1,11 @@
+use std::future::Future;
 use std::result::Result as StdResult;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ai::api_keys::{ApiKeyManager, ChatGPTConnectFailure};
 use anyhow::{Result, anyhow};
+use futures::future::Either;
 use settings::Setting as _;
 #[cfg(target_family = "wasm")]
 use url::Url;
@@ -13,9 +16,11 @@ use warp_errors::{report_error, report_if_error};
 use warp_graphql::mutations::create_anonymous_user::{
     AnonymousUserType, CreateAnonymousUserResult,
 };
+use warp_server_auth::API_KEY_PREFIX;
 use warp_server_auth::user::persistence::PersistedUser;
+use warpui::r#async::Timer;
 use warpui::clipboard::ClipboardContent;
-use warpui::{Entity, ModelContext, SingletonEntity, UpdateModel};
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity, UpdateModel};
 
 use super::auth_state::{AuthState, PersistAction};
 use super::auth_view_modal::{AuthRedirectPayload, AuthViewVariant};
@@ -86,6 +91,46 @@ pub enum AuthManagerEvent {
 pub type LoginGatedFeature = &'static str;
 
 type URLConstructorCallback = Box<dyn FnOnce(Option<&str>) -> String>;
+const DEVICE_CODE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const DEVICE_CODE_REQUEST_ATTEMPTS: usize = 2;
+
+async fn request_device_code_with_timeout<F, Fut>(
+    mut request: F,
+    timeout: Duration,
+    attempts: usize,
+) -> StdResult<oauth2::StandardDeviceAuthorizationResponse, UserAuthenticationError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<
+        Output = StdResult<oauth2::StandardDeviceAuthorizationResponse, UserAuthenticationError>,
+    >,
+{
+    assert!(
+        attempts > 0,
+        "device code request requires at least one attempt"
+    );
+
+    for attempt in 1..=attempts {
+        let request = request();
+        let timeout = Timer::after(timeout);
+        futures::pin_mut!(request);
+        futures::pin_mut!(timeout);
+
+        match futures::future::select(request, timeout).await {
+            Either::Left((result, _)) => return result,
+            Either::Right(_) if attempt < attempts => {
+                log::info!(
+                    "Device authorization code request timed out; retrying ({attempt}/{attempts})"
+                );
+            }
+            Either::Right(_) => {
+                return Err(UserAuthenticationError::DeviceCodeRequestTimedOut { attempts });
+            }
+        }
+    }
+
+    unreachable!("attempt count is asserted to be nonzero")
+}
 
 /// AuthManager is a singleton model which manages the currently logged-in user's state.
 /// If you need to access the state, use `AuthStateProvider`.
@@ -188,6 +233,16 @@ impl AuthManager {
                 return;
             }
             send_telemetry_from_ctx!(TelemetryEvent::AnonymousUserLinkedFromBrowser, ctx);
+        } else if self.incoming_login_conflicts_with_pending_chatgpt_connect(&user_uid, ctx) {
+            // A connect attempt only ever expects a link result, never a login. A login for
+            // another account here would silently switch the user's Warp account.
+            log::warn!(
+                "Ignoring login handoff for a different user while a ChatGPT connect is pending"
+            );
+            ApiKeyManager::handle(ctx).update(ctx, |manager, ctx| {
+                manager.fail_chatgpt_oauth(ChatGPTConnectFailure::AccountMismatch, ctx);
+            });
+            return;
         }
 
         let _ = ctx.spawn(
@@ -261,6 +316,28 @@ impl AuthManager {
             Self::on_user_fetched,
         );
     }
+    /// Validates a startup API key without exposing it through shared auth state.
+    ///
+    /// [`Self::on_user_fetched`] promotes the returned user and credentials only
+    /// after the server accepts the key. A failed request leaves the client
+    /// fully logged out.
+    pub fn authenticate_api_key(&self, api_key: String, ctx: &mut ModelContext<Self>) {
+        log::info!("Authenticating via pending API key");
+        let api_key = if api_key.starts_with(API_KEY_PREFIX) {
+            api_key
+        } else {
+            format!("{API_KEY_PREFIX}{api_key}")
+        };
+        let auth_client = self.auth_client.clone();
+        let _ = ctx.spawn(
+            async move {
+                auth_client
+                    .fetch_user(LoginToken::ApiKey(api_key), false)
+                    .await
+            },
+            Self::on_user_fetched,
+        );
+    }
 
     /// Authenticate asynchronously using the OAuth2 device authorization flow.
     ///
@@ -274,7 +351,14 @@ impl AuthManager {
         let auth_client = self.auth_client.clone();
         // Request a device code the user can enter in their browser.
         ctx.spawn(
-            async move { auth_client.request_device_code().await },
+            async move {
+                request_device_code_with_timeout(
+                    || auth_client.request_device_code(),
+                    DEVICE_CODE_REQUEST_TIMEOUT,
+                    DEVICE_CODE_REQUEST_ATTEMPTS,
+                )
+                .await
+            },
             Self::on_device_code_received,
         );
     }
@@ -338,7 +422,7 @@ impl AuthManager {
                     llms,
                 } = user_output.into();
 
-                self.set_and_persist(Some(user.clone()), Some(credentials), ctx);
+                self.complete_authentication(user.clone(), credentials, ctx);
 
                 self.set_needs_reauth(false, ctx);
 
@@ -504,6 +588,7 @@ impl AuthManager {
                         self.set_needs_reauth(true, ctx);
                     }
                     UserAuthenticationError::UserAccountDisabled(_) => {}
+                    UserAuthenticationError::DeviceCodeRequestTimedOut { .. } => {}
                     UserAuthenticationError::Unexpected(_) => {}
                     UserAuthenticationError::InvalidStateParameter => {}
                     UserAuthenticationError::MissingStateParameter => {}
@@ -517,6 +602,14 @@ impl AuthManager {
     /// Sets the user and credentials in auth state and persists to secure storage.
     /// Persistence depends on the credential type - currently, we only persist
     /// state if authenticated via a Firebase token.
+    fn complete_authentication(
+        &self,
+        user: User,
+        credentials: Credentials,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.set_and_persist(Some(user), Some(credentials), ctx);
+    }
     fn set_and_persist(
         &self,
         user: Option<User>,
@@ -837,6 +930,23 @@ impl AuthManager {
             true
         } else {
             false
+        }
+    }
+
+    fn incoming_login_conflicts_with_pending_chatgpt_connect(
+        &self,
+        incoming_user_uid: &Option<UserUid>,
+        ctx: &AppContext,
+    ) -> bool {
+        if !FeatureFlag::ChatGPTSubscription.is_enabled()
+            || self.auth_state.is_anonymous_or_logged_out()
+            || !ApiKeyManager::as_ref(ctx).chatgpt_oauth_pending()
+        {
+            return false;
+        }
+        match (self.auth_state.user_id(), incoming_user_uid) {
+            (Some(current_uid), Some(incoming_uid)) => current_uid != *incoming_uid,
+            _ => false,
         }
     }
 

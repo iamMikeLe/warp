@@ -5,7 +5,6 @@ use warp_graphql::object_permissions::AccessLevel;
 use warp_util::path::EscapeChar;
 use warpui::{App, EntityId, SingletonEntity};
 
-use crate::LaunchMode;
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::blocklist::{BlocklistAIHistoryModel, BlocklistAIPermissions};
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
@@ -35,7 +34,14 @@ use crate::settings::{AISettings, AgentModeCommandExecutionPredicate, PrivacySet
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workspaces::team_tester::TeamTesterStatus;
 use crate::workspaces::user_profiles::UserProfiles;
-use crate::workspaces::user_workspaces::UserWorkspaces;
+use crate::workspaces::user_workspaces::{TeamContextForOperation, UserWorkspaces};
+use crate::{LaunchMode, TuiEntryPoint};
+
+/// These tests mock `UserWorkspaces` with no teams, so no team policy can apply and the scope
+/// only has to exist. Scoped reads themselves are covered in `user_workspaces_tests`.
+fn test_scope() -> TeamContextForOperation {
+    TeamContextForOperation::new_for_test(ServerId::from(1))
+}
 
 fn mock_server_metadata(uid: ServerId) -> ServerMetadata {
     ServerMetadata {
@@ -162,8 +168,10 @@ fn tui_missing_collection_seeds_agent_decides_for_execute_commands() {
         let profile_model = app.add_singleton_model(|ctx| {
             AIExecutionProfilesModel::new(
                 &LaunchMode::Tui {
-                    mount: Box::new(|_| {}),
-                    api_key: None,
+                    entrypoint: TuiEntryPoint::Interactive {
+                        mount: Box::new(|_| {}),
+                        api_key: None,
+                    },
                 },
                 ctx,
             )
@@ -197,8 +205,10 @@ fn tui_default_denylist_overrides_agent_decides_command_execution() {
         let profile_model = app.add_singleton_model(|ctx| {
             AIExecutionProfilesModel::new(
                 &LaunchMode::Tui {
-                    mount: Box::new(|_| {}),
-                    api_key: None,
+                    entrypoint: TuiEntryPoint::Interactive {
+                        mount: Box::new(|_| {}),
+                        api_key: None,
+                    },
                 },
                 ctx,
             )
@@ -232,6 +242,7 @@ fn tui_default_denylist_overrides_agent_decides_command_execution() {
                 false,
                 Some(false),
                 Some(terminal_view_id),
+                &test_scope(),
                 ctx,
             );
             assert!(!result.is_allowed());
@@ -266,8 +277,10 @@ fn tui_explicit_collection_preserves_execute_commands() {
         let profile_model = app.add_singleton_model(|ctx| {
             AIExecutionProfilesModel::new(
                 &LaunchMode::Tui {
-                    mount: Box::new(|_| {}),
-                    api_key: None,
+                    entrypoint: TuiEntryPoint::Interactive {
+                        mount: Box::new(|_| {}),
+                        api_key: None,
+                    },
                 },
                 ctx,
             )
@@ -1293,8 +1306,10 @@ fn profile_sources_preserve_state_across_migration_and_rollout() {
             app.add_model(|ctx| {
                 AIExecutionProfilesModel::new(
                     &LaunchMode::Tui {
-                        mount: Box::new(|_| {}),
-                        api_key: None,
+                        entrypoint: TuiEntryPoint::Interactive {
+                            mount: Box::new(|_| {}),
+                            api_key: None,
+                        },
                     },
                     ctx,
                 )

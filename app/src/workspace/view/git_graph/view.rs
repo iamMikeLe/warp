@@ -1192,6 +1192,7 @@ impl GitGraphView {
             let signal_tx = view.auto_refresh_tx.clone();
             let start = repository.update(ctx, |repo, ctx| {
                 repo.start_watching(
+                    repo_metadata::RepositoryWatchMode::GitRepository,
                     Box::new(auto_refresh::GitGraphRepositorySubscriber { signal_tx }),
                     ctx,
                 )

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use async_channel::Sender;
 use repo_metadata::repository::{RepositorySubscriber, SubscriberId};
-use repo_metadata::{Repository, RepositoryUpdate};
+use repo_metadata::{Repository, RepositoryUpdate, RepositoryWatchMode};
 use warp_core::features::FeatureFlag;
 use warp_util::standardized_path::StandardizedPath;
 use warpui::r#async::SpawnedFutureHandle;
@@ -137,6 +137,7 @@ impl LocalGitRepoStatusModel {
         let (throttled_tx, throttled_rx) = async_channel::unbounded();
         let start = repository_model.update(ctx, |repo, ctx| {
             repo.start_watching(
+                RepositoryWatchMode::GitRepository,
                 Box::new(GitStatusRepositorySubscriber {
                     repository_update_tx,
                 }),

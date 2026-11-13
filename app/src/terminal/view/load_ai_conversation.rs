@@ -718,13 +718,12 @@ impl TerminalView {
         // Compute all block indices based on the restoration type
         let command_block_indices = {
             let terminal_model = self.model.lock();
-            let exchange_count = all_exchanges_with_conversation_ids.len();
             command_block_indices_for_exchanges(
                 &terminal_model,
                 all_exchanges_with_conversation_ids
                     .iter()
                     .map(|(exchange, _)| exchange),
-                exchange_count,
+                BlockIndex::from(0),
             )
         };
 
@@ -944,6 +943,7 @@ impl TerminalView {
             autoexecute_override: None,
             last_event_sequence: None,
             pinned: false,
+            use_warp_credits_instead_of_chatgpt: false,
         };
 
         // We already early-return for empty `tasks` above, so the strict
@@ -1029,7 +1029,9 @@ impl TerminalView {
         });
 
         // Insert into block list if command_block_index is provided
-        let item = RichContentItem::new(
+        let is_agent_transcript_user_query =
+            restored_block_view_handle.as_ref(ctx).has_user_input(ctx);
+        let item = RichContentItem::new_with_agent_transcript_user_query(
             Some(RichContentType::AIBlock),
             restored_block_view_handle.id(),
             FeatureFlag::AgentView
@@ -1042,6 +1044,7 @@ impl TerminalView {
                     .agent_view_state()
                     .active_conversation_id()
                     .is_some_and(|id| id == conversation_id),
+            is_agent_transcript_user_query,
         );
         if let Some(cmd_block_index) = command_block_index {
             self.model

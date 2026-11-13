@@ -1,18 +1,105 @@
+use futures::executor::block_on;
+use mockito::{Matcher, Server};
+use warp_core::channel::ChannelState;
+use warp_server_client::base_client::{AMBIENT_WORKLOAD_TOKEN_HEADER, CLOUD_AGENT_ID_HEADER};
+
+use super::{HarnessSupportClient, ServerApi};
 use crate::ai::artifacts::Artifact;
 
 #[test]
-fn upload_target_deserializes_null_fields_as_empty() {
+fn transcript_download_resolves_url_with_requested_task_scope() {
+    let ambient_task = "11111111-1111-4111-8111-111111111111";
+    for task_scope in [None, Some("22222222-2222-4222-8222-222222222222")] {
+        let mut storage = Server::new();
+        let storage_request = storage
+            .mock("GET", "/transcript")
+            .match_header(AMBIENT_WORKLOAD_TOKEN_HEADER, Matcher::Missing)
+            .match_header(CLOUD_AGENT_ID_HEADER, Matcher::Missing)
+            .match_header("x-warp-os-category", Matcher::Missing)
+            .with_status(200)
+            .with_body("raw transcript")
+            .create();
+        let api_request = {
+            let mut server = ChannelState::mock_server();
+            server
+                .mock("GET", "/api/v1/harness-support/transcript")
+                .match_query(Matcher::UrlEncoded("redirect".into(), "false".into()))
+                .match_header(CLOUD_AGENT_ID_HEADER, task_scope.unwrap_or(ambient_task))
+                .match_header(AMBIENT_WORKLOAD_TOKEN_HEADER, "test-workload-token")
+                .with_status(200)
+                .with_body(
+                    serde_json::json!({"url": format!("{}/transcript", storage.url())}).to_string(),
+                )
+                .create()
+        };
+        let api = ServerApi::new_for_test();
+        api.base_client
+            .set_ambient_workload_token_for_test("test-workload-token".into(), None);
+        api.set_ambient_agent_task_id(Some(ambient_task.parse().unwrap()));
+        let bytes = block_on(async {
+            if let Some(task_id) = task_scope {
+                api.fetch_transcript_for_task(&task_id.parse().unwrap())
+                    .await
+            } else {
+                api.fetch_transcript().await
+            }
+        })
+        .unwrap();
+        assert_eq!(bytes.as_ref(), b"raw transcript");
+        api_request.assert();
+        storage_request.assert();
+    }
+}
+
+/// The server marshals its unset Go maps and slices as `null`, which a POST
+/// target routinely carries for `headers`.
+#[test]
+fn upload_target_deserializes_null_headers_and_fields_as_empty() {
     use super::UploadTarget;
 
     let target: UploadTarget = serde_json::from_value(serde_json::json!({
         "url": "https://example.com/upload",
         "method": "PUT",
-        "headers": {},
+        "headers": null,
         "fields": null
     }))
     .unwrap();
 
-    assert_eq!(target.fields.len(), 0);
+    assert!(target.headers.is_empty());
+    assert!(target.fields.is_empty());
+}
+
+/// Each `kind` here is a discriminator from the `UploadFieldValue` schema in
+/// warp-server's `public_api/openapi.yaml`. A mismatch fails the whole target,
+/// so every presigned POST upload would break.
+#[test]
+fn upload_field_value_deserializes_every_server_kind() {
+    use super::{UploadFieldValue, UploadTarget};
+
+    let target: UploadTarget = serde_json::from_value(serde_json::json!({
+        "url": "https://example.com/upload",
+        "method": "POST",
+        "headers": {},
+        "fields": [
+            {"name": "key", "value": {"kind": "static", "value": "object/key"}},
+            {"name": "x-amz-checksum-crc32c", "value": {"kind": "content_crc32c"}},
+            {"name": "file", "value": {"kind": "content_data"}}
+        ]
+    }))
+    .unwrap();
+
+    assert!(matches!(
+        &target.fields[0].value,
+        UploadFieldValue::Static { value } if value == "object/key"
+    ));
+    assert!(matches!(
+        target.fields[1].value,
+        UploadFieldValue::ContentCrc32C
+    ));
+    assert!(matches!(
+        target.fields[2].value,
+        UploadFieldValue::ContentData
+    ));
 }
 
 /// Assert that `Artifact`s serialize to the expected format for the /harness-support/report-artifact
@@ -34,6 +121,28 @@ fn pull_request_artifact_serializes_to_expected_wire_format() {
             "data": {
                 "url": "https://github.com/org/repo/pull/42",
                 "branch": "feature-branch"
+            }
+        })
+    );
+}
+
+#[test]
+fn report_shutdown_abnormal_serializes_exit_code() {
+    use super::ReportShutdownRequest;
+
+    let request = ReportShutdownRequest::abnormal(
+        "process_exit".to_string(),
+        "agent exited with status 143".to_string(),
+        Some(143),
+    );
+    let json = serde_json::to_value(&request).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "error": {
+                "category": "process_exit",
+                "message": "agent exited with status 143",
+                "exit_code": 143
             }
         })
     );
@@ -115,7 +224,8 @@ fn report_shutdown_clean_serializes_without_error() {
 fn report_shutdown_abnormal_serializes_with_error() {
     use super::ReportShutdownRequest;
 
-    let request = ReportShutdownRequest::abnormal("oom".to_string(), "out of memory".to_string());
+    let request =
+        ReportShutdownRequest::abnormal("oom".to_string(), "out of memory".to_string(), None);
     let json = serde_json::to_value(&request).unwrap();
     assert_eq!(
         json,
@@ -126,4 +236,32 @@ fn report_shutdown_abnormal_serializes_with_error() {
             }
         })
     );
+}
+
+#[test]
+fn report_transport_input_maps_the_transport_and_optional_reason() {
+    use warp_cli::agent::HarnessTransport;
+    use warp_graphql::mutations::report_harness_transport::{
+        HarnessTransport as GraphQLHarnessTransport, HarnessTransportFallbackReason,
+    };
+
+    use super::report_harness_transport_input;
+
+    let acp = report_harness_transport_input(HarnessTransport::Acp, None).unwrap();
+    assert_eq!(acp.transport, GraphQLHarnessTransport::Acp);
+    assert_eq!(acp.fallback_reason, None);
+
+    for (reason, expected) in [
+        ("no_sidecar", HarnessTransportFallbackReason::NoSidecar),
+        (
+            "sidecar_without_adapter",
+            HarnessTransportFallbackReason::SidecarWithoutAdapter,
+        ),
+    ] {
+        let fallback = report_harness_transport_input(HarnessTransport::Pty, Some(reason)).unwrap();
+        assert_eq!(fallback.transport, GraphQLHarnessTransport::Pty);
+        assert_eq!(fallback.fallback_reason, Some(expected), "{reason}");
+    }
+
+    assert!(report_harness_transport_input(HarnessTransport::Pty, Some("bogus")).is_err());
 }

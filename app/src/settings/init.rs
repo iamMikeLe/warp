@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use settings::{Setting as _, SettingsManager};
+use warp_core::channel::ChannelState;
 use warp_core::features::FeatureFlag;
 use warp_core::semantic_selection::SemanticSelection;
 use warp_errors::report_if_error;
@@ -20,7 +21,8 @@ use super::{
     InputModeSettings, InputSettings, LocalControlSettings, PaneSettings,
     SameLinePromptBlockSettings, ScrollSettings, SelectionSettings,
     SharedObjectLimitBannerSettings, SshSettings, ThemeSettings, TuiAutoupdateSettings,
-    TuiThemeSettings, TuiZeroStateSettings, VimBannerSettings, WarpDrivePrivacySettings,
+    TuiThemeSettings, TuiVoiceSettings, TuiZeroStateSettings, VimBannerSettings,
+    WarpDrivePrivacySettings,
 };
 use crate::ai::cloud_agent_settings::CloudAgentSettings;
 use crate::appearance;
@@ -39,7 +41,7 @@ use crate::terminal::settings::TerminalSettings;
 use crate::terminal::shared_session::settings::SharedSessionSettings;
 use crate::terminal::warpify::settings::WarpifySettings;
 use crate::undo_close::UndoCloseSettings;
-use crate::window_settings::WindowSettings;
+use crate::window_settings::{WindowSettings, stage_legacy_background_backdrop};
 use crate::workflows::aliases::WorkflowAliases;
 use crate::workspace::tab_settings::TabSettings;
 
@@ -83,10 +85,14 @@ pub fn register_all_settings(ctx: &mut AppContext) {
     ThemeSettings::register(ctx);
     TuiAutoupdateSettings::register(ctx);
     TuiThemeSettings::register(ctx);
+    TuiVoiceSettings::register(ctx);
     TuiZeroStateSettings::register(ctx);
     AccessibilitySettings::register(ctx);
     NativePreferenceSettings::register(ctx);
     CloudPreferencesSettings::register(ctx);
+    if ChannelState::iap_config().is_some() {
+        super::IapRoutingSettings::register(ctx);
+    }
     WarpDrivePrivacySettings::register(ctx);
     UserAppInstallDetectionSettings::register(ctx);
     AppIconSettings::register(ctx);
@@ -134,6 +140,7 @@ pub fn init(
     if needs_settings_file_migration(ctx) {
         migrate_native_settings_to_settings_file(ctx);
     }
+    stage_legacy_background_backdrop(ctx);
 
     let use_thin_strokes = *FontSettings::as_ref(ctx).use_thin_strokes;
 
@@ -158,9 +165,8 @@ pub fn init(
         None
     };
 
-    // Always log a settings-load failure. The GUI additionally surfaces this
-    // via a banner/footer, but headless surfaces (e.g. the TUI) have no such
-    // UI, so the log is the baseline signal. Final user-facing UX is TBD.
+    // Always log a settings-load failure with its full details. User-facing
+    // surfaces may additionally present a shorter summary.
     if let Some(err) = &settings_file_error {
         match err {
             super::SettingsFileError::FileParseFailed(detail) => {
