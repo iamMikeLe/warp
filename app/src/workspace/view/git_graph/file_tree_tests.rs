@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use super::super::data::ChangedFile;
+use super::super::data::{ChangedFile, FileStatus};
 use super::{FileRow, all_dir_paths, build_file_rows};
 
 /// Terse constructor for a changed file with explicit counts.
@@ -12,6 +12,7 @@ fn file(path: &str, additions: u32, deletions: u32) -> ChangedFile {
         path: path.to_string(),
         additions,
         deletions,
+        status: FileStatus::Modified,
     }
 }
 

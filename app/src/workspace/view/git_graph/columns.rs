@@ -179,16 +179,14 @@ pub(super) fn render_column_header(
     .finish()
 }
 
-/// A ref label for the Branch / Tag cell, in its commit's lane color: an icon for the ref kind (two
-/// when a local branch and its remote-tracking branch point here), the name (ellipsized to fit),
-/// and the ref's right-click menu.
-fn render_ref_label(
-    primary: &PrimaryRef<'_>,
+/// A ref pill in `color`: an icon for the ref kind, a second (remote) icon when
+/// `tracked_remote` is set, and the name ellipsized to fit. The current branch is drawn filled.
+pub(super) fn ref_pill(
+    label: &RefLabel,
+    tracked_remote: bool,
     color: ColorU,
-    menu_target: (usize, &str),
     appearance: &Appearance,
 ) -> Box<dyn Element> {
-    let label = primary.label;
     let is_current = label.kind == RefKind::Head;
     let (bg, fg) = if is_current {
         (color, warp_core::ui::color::pick_foreground_color(color))
@@ -198,7 +196,7 @@ fn render_ref_label(
     let mut content = Flex::row()
         .with_cross_axis_alignment(CrossAxisAlignment::Center)
         .with_child(small_icon(ref_icon(label.kind), fg));
-    if primary.tracked_remote.is_some() {
+    if tracked_remote {
         content = content.with_child(
             Container::new(small_icon(Icon::Cloud, fg))
                 .with_padding_left(2.)
@@ -223,12 +221,23 @@ fn render_ref_label(
         )
         .finish(),
     );
-    let pill = Container::new(content.finish())
+    Container::new(content.finish())
         .with_background_color(bg)
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(3.)))
         .with_horizontal_padding(5.)
         .with_vertical_padding(2.)
-        .finish();
+        .finish()
+}
+
+/// The row's ref pill in its commit's lane color, with the ref's right-click menu.
+fn render_ref_label(
+    primary: &PrimaryRef<'_>,
+    color: ColorU,
+    menu_target: (usize, &str),
+    appearance: &Appearance,
+) -> Box<dyn Element> {
+    let label = primary.label;
+    let pill = ref_pill(label, primary.tracked_remote.is_some(), color, appearance);
 
     let (index, position_id) = menu_target;
     let position_id = position_id.to_string();

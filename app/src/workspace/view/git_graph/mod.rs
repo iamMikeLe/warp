@@ -20,6 +20,7 @@
 //!   change triggers a position-preserving reload.
 
 pub(crate) mod auto_refresh;
+pub(crate) mod avatar;
 pub(crate) mod columns;
 pub(crate) mod data;
 pub(crate) mod file_tree;

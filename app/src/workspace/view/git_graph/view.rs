@@ -40,7 +40,7 @@ use warpui::elements::{
     PositionedElementAnchor, PositionedElementOffsetBounds, Radius, Resizable,
     ResizableStateHandle, SavePosition, ScrollStateHandle, Scrollable, ScrollableElement,
     ScrollbarWidth, SelectableArea, SelectionHandle, Shrinkable, Stack, Text, UniformList,
-    UniformListState, resizable_state_handle,
+    UniformListState, Wrap, resizable_state_handle,
 };
 use warpui::fonts::{Properties, Weight};
 use warpui::geometry::vector::{Vector2F, vec2f};
@@ -56,7 +56,7 @@ use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewCon
 #[cfg(feature = "local_fs")]
 use super::auto_refresh;
 use super::columns::{self, ColumnWidths};
-use super::data::{BranchRef, ChangedFile, CommitDetail, CommitNode, RefKind, RefLabel};
+use super::data::{BranchRef, ChangedFile, CommitDetail, CommitNode, FileStatus, RefKind};
 use super::layout::{GraphLayout, build_layout};
 use super::menu::{DEFAULT_PUSH_REMOTE, MenuKind, PromptKind, build_menu};
 use super::ops::{GitWriteOp, ResetMode, archive_format_from_path};
@@ -72,6 +72,9 @@ use crate::view_components::dropdown::{Dropdown, DropdownAction, DropdownEvent};
 
 /// Number of commits loaded per page.
 const COMMIT_PAGE_SIZE: usize = 200;
+/// The commit chip plus up to this many minus one parent chips (octopus merges beyond that are
+/// rare and stay reachable from the graph).
+const DETAIL_HASH_CHIPS: usize = 5;
 
 /// Per-depth horizontal indent (px) of rows in the detail area's file tree
 /// (matches the Project Explorer's folder indent).
@@ -101,6 +104,8 @@ pub(crate) fn init(app: &mut AppContext) {
 pub(crate) enum GitGraphAction {
     /// Select the Nth commit row in the list and load its detail.
     SelectCommit(usize),
+    /// Select a loaded commit by its full hash and scroll it into view (no-op if not loaded).
+    SelectCommitByHash(String),
     /// Select the synthetic "uncommitted changes" row and load its diff detail.
     SelectUncommitted,
     /// Switch to the Nth repository in the discovered list (dispatched by the
@@ -403,6 +408,8 @@ pub(crate) struct GitGraphView {
     detail_height_initialized: Arc<AtomicBool>,
     /// Mouse state of the detail area's close button.
     detail_close_mouse_state: MouseStateHandle,
+    /// The detail's hash chips: the commit itself, then its parents.
+    detail_hash_mouse_states: Vec<MouseStateHandle>,
     /// Text selection states of the detail area's drag-selectable segments
     /// (subject / hash + body / the identity hover card), preserved across
     /// re-renders. Separate segments because the author / committer rows
@@ -698,6 +705,9 @@ impl GitGraphView {
             graph_column_state: resizable_state_handle(columns::DEFAULT_GRAPH_WIDTH),
             detail_height_initialized: Arc::new(AtomicBool::new(false)),
             detail_close_mouse_state: MouseStateHandle::default(),
+            detail_hash_mouse_states: (0..DETAIL_HASH_CHIPS)
+                .map(|_| MouseStateHandle::default())
+                .collect(),
             detail_selection_handles: Default::default(),
             detail_selected_text: Arc::new(RwLock::new(None)),
             detail_author_mouse_states: Default::default(),
@@ -2044,8 +2054,15 @@ impl GitGraphView {
             }
             DetailState::Loaded(detail) => {
                 let commit = self.selected.and_then(|i| self.commits.get(i));
+                let lane_offset = usize::from(self.uncommitted_count > 0);
+                let accent = self
+                    .selected
+                    .and_then(|i| self.layout.rows.get(i + lane_offset))
+                    .map(|row| super::row_canvas::lane_color(row.node_color));
                 render_detail_body(
                     commit,
+                    accent,
+                    &self.detail_hash_mouse_states,
                     detail,
                     self.detail_scroll_state.clone(),
                     &self.detail_selection_handles,
@@ -3375,42 +3392,6 @@ fn render_centered_placeholder(
     Shrinkable::new(1.0, Align::new(content.finish()).finish()).finish()
 }
 
-/// Badge color for a ref label (by kind).
-pub(super) fn ref_badge_color(kind: RefKind) -> ColorU {
-    match kind {
-        RefKind::Head => ColorU {
-            r: 0x4e,
-            g: 0xc9,
-            b: 0x7a,
-            a: 0xff,
-        }, // green
-        RefKind::LocalBranch => ColorU {
-            r: 0x4f,
-            g: 0xc1,
-            b: 0xff,
-            a: 0xff,
-        }, // blue
-        RefKind::RemoteBranch => ColorU {
-            r: 0xd6,
-            g: 0x7c,
-            b: 0xff,
-            a: 0xff,
-        }, // purple
-        RefKind::Tag => ColorU {
-            r: 0xe6,
-            g: 0xd2,
-            b: 0x4f,
-            a: 0xff,
-        }, // yellow
-        RefKind::Stash => ColorU {
-            r: 0x3b,
-            g: 0xa5,
-            b: 0xf0,
-            a: 0xff,
-        }, // stash blue
-    }
-}
-
 /// Maps a ref label to the context menu it opens. The HEAD badge stands in for
 /// the branch it points at — it gets the local-branch menu flagged as the
 /// current branch (so self-only operations like delete / merge-into-current are
@@ -3433,104 +3414,6 @@ pub(super) fn ref_menu_kind(kind: RefKind, name: String, index: usize) -> MenuKi
     }
 }
 
-/// Renders a single ref label badge. Most refs use a "ghost pill" (rounded,
-/// semi-transparent background + same-colored text). The current branch (HEAD)
-/// instead uses a "filled pill" — a solid background with contrasting text — so
-/// it stands out from every other ref at a glance.
-///
-/// When `menu_target` is `Some((row_index, panel_position_id))` the badge is
-/// right-clickable, opening the tag/branch context menu for that ref; the detail
-/// area passes `None` (its badges are display-only).
-fn render_ref_badge(
-    label: &RefLabel,
-    menu_target: Option<(usize, &str)>,
-    appearance: &Appearance,
-) -> Box<dyn Element> {
-    let color = ref_badge_color(label.kind);
-    let is_current = label.kind == RefKind::Head;
-    let (bg, text_color) = if is_current {
-        (color, pick_foreground_color(color))
-    } else {
-        (ColorU { a: 0x33, ..color }, color)
-    };
-    let text = Text::new_inline(
-        label.name.clone(),
-        appearance.ui_font_family(),
-        appearance.ui_font_size(),
-    )
-    .with_color(text_color.into())
-    .finish();
-    // Every badge leads with an icon so its kind reads at a glance: a branch
-    // glyph for branches (local / remote / the current HEAD), a bookmark for
-    // tags, and an inbox for stashes.
-    let leading_icon = match label.kind {
-        RefKind::Head | RefKind::LocalBranch | RefKind::RemoteBranch => Icon::GitBranch,
-        RefKind::Tag => Icon::Bookmark,
-        RefKind::Stash => Icon::Inbox,
-    };
-    let icon = ConstrainedBox::new(leading_icon.to_warpui_icon(text_color.into()).finish())
-        .with_width(12.)
-        .with_height(12.)
-        .finish();
-    let content: Box<dyn Element> = Flex::row()
-        .with_cross_axis_alignment(CrossAxisAlignment::Center)
-        .with_child(icon)
-        .with_child(Container::new(text).with_padding_left(3.).finish())
-        .finish();
-    let badge = Container::new(content)
-        .with_background_color(bg)
-        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(3.)))
-        .with_horizontal_padding(5.)
-        .with_vertical_padding(1.)
-        .finish();
-
-    // The current branch (HEAD) carries a hollow "you are here" ring just left
-    // of its pill — a filled box with a border and no fill draws as a ring once
-    // the corner radius rounds it to a circle. It used to mark the commit on the
-    // graph lane, but sitting beside the branch name reads more directly.
-    let pill: Box<dyn Element> = if is_current {
-        let ring = Container::new(
-            ConstrainedBox::new(Empty::new().finish())
-                .with_width(8.)
-                .with_height(8.)
-                .finish(),
-        )
-        .with_border(Border::all(2.).with_border_fill(color))
-        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.)))
-        .finish();
-        Flex::row()
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_child(Container::new(ring).with_padding_right(5.).finish())
-            .with_child(badge)
-            .finish()
-    } else {
-        badge
-    };
-
-    let inner = Container::new(pill).with_padding_right(4.).finish();
-
-    match menu_target {
-        Some((index, position_id)) => {
-            let position_id = position_id.to_string();
-            let menu_kind = ref_menu_kind(label.kind, label.name.clone(), index);
-            Hoverable::new(MouseStateHandle::default(), move |_| inner)
-                .on_right_click(move |ctx, _app, position| {
-                    let Some(bounds) = ctx.element_position_by_id(&position_id) else {
-                        return;
-                    };
-                    let offset = position - bounds.origin();
-                    ctx.dispatch_typed_action(GitGraphAction::OpenMenu {
-                        kind: menu_kind.clone(),
-                        x: offset.x(),
-                        y: offset.y(),
-                    });
-                })
-                .finish()
-        }
-        None => inner,
-    }
-}
-
 /// Formats a Unix-seconds timestamp for the detail area. Within 24 hours of
 /// the system's current time it stays relative (just now / N minutes ago /
 /// N hours ago); anything older becomes an absolute `yyyy-MM-dd HH:mm:ss` in
@@ -3541,26 +3424,25 @@ fn detail_time(unix_secs: i64) -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(unix_secs);
-    let diff = now - unix_secs;
-    match diff {
+    let absolute = chrono::DateTime::from_timestamp(unix_secs, 0)
+        .map(|t| {
+            t.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_else(|| unix_secs.to_string());
+    format!("{} · {absolute}", relative_time(now - unix_secs))
+}
+
+fn relative_time(seconds_ago: i64) -> String {
+    let plural = |n: i64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
+    match seconds_ago {
         i64::MIN..=59 => "just now".to_string(),
-        60..=3_599 => {
-            let n = diff / 60;
-            format!("{n} minute{} ago", if n == 1 { "" } else { "s" })
-        }
-        3_600..=86_399 => {
-            let n = diff / 3_600;
-            format!("{n} hour{} ago", if n == 1 { "" } else { "s" })
-        }
-        // `from_timestamp` is None only for out-of-range timestamps; fall back
-        // to the raw seconds rather than showing nothing.
-        _ => chrono::DateTime::from_timestamp(unix_secs, 0)
-            .map(|t| {
-                t.with_timezone(&chrono::Local)
-                    .format("%Y-%m-%d %H:%M:%S")
-                    .to_string()
-            })
-            .unwrap_or_else(|| unix_secs.to_string()),
+        60..=3_599 => plural(seconds_ago / 60, "minute"),
+        3_600..=86_399 => plural(seconds_ago / 3_600, "hour"),
+        86_400..=2_591_999 => plural(seconds_ago / 86_400, "day"),
+        2_592_000..=31_535_999 => plural(seconds_ago / 2_592_000, "month"),
+        _ => plural(seconds_ago / 31_536_000, "year"),
     }
 }
 
@@ -3645,6 +3527,7 @@ fn detail_selection_area(
 /// can't cut it off.
 fn render_identity_row(
     label: String,
+    name_chars: usize,
     identity: String,
     mouse_states: (MouseStateHandle, MouseStateHandle),
     selection_handles: &[SelectionHandle; 3],
@@ -3681,7 +3564,13 @@ fn render_identity_row(
     let card = Hoverable::new(card_mouse_state, move |_| card_body).finish();
 
     Hoverable::new(row_mouse_state, move |row_state| {
-        let text = Text::new_inline(label, font, size).with_color(dim).finish();
+        let text = Text::new_inline(label, font, size)
+            .with_color(dim)
+            .with_single_highlight(
+                Highlight::new().with_foreground_color(fg),
+                (0..name_chars).collect(),
+            )
+            .finish();
         let mut stack = Stack::new();
         stack.add_child(text);
         // Keep the card mounted while the mouse is over the card itself, not
@@ -3771,6 +3660,8 @@ fn render_diff_counts(
 #[allow(clippy::too_many_arguments)]
 fn render_detail_body(
     commit: Option<&CommitNode>,
+    accent: Option<ColorU>,
+    hash_mouse_states: &[MouseStateHandle],
     detail: &CommitDetail,
     scroll_state: ClippedScrollStateHandle,
     selection_handles: &[SelectionHandle; 3],
@@ -3797,7 +3688,7 @@ fn render_detail_body(
             .unwrap_or_default()
             .to_string()
     });
-    let subject_text = Text::new(subject, font, size)
+    let subject_text = Text::new(subject, font, size + 2.)
         .with_color(fg)
         .with_selectable(true)
         .with_style(Properties::default().weight(Weight::Bold))
@@ -3811,64 +3702,94 @@ fn render_detail_body(
             &selected_text,
         ));
 
-    // ---- Author / committer rows (dimmed; hovering opens the identity card
-    // with the drag-selectable `name <email>`) ----
+    if let Some(c) = commit
+        && !c.refs.is_empty()
+    {
+        let color = accent.unwrap_or_else(|| super::row_canvas::lane_color(0));
+        let chips = c
+            .refs
+            .iter()
+            .map(|label| super::columns::ref_pill(label, false, color, appearance));
+        meta_col = meta_col.with_child(
+            Container::new(
+                Wrap::row()
+                    .with_spacing(4.)
+                    .with_run_spacing(4.)
+                    .with_children(chips)
+                    .finish(),
+            )
+            .with_margin_top(6.)
+            .finish(),
+        );
+    }
+
+    // ---- Author / committer rows (hovering opens the identity card with the
+    // drag-selectable `name <email>`) ----
     if let Some(c) = commit {
         let author_row = render_identity_row(
             format!("{} · {}", c.author_name, detail_time(c.author_time)),
+            c.author_name.chars().count(),
             format!("{} <{}>", c.author_name, c.author_email),
             author_mouse_states,
             selection_handles,
             &selected_text,
             appearance,
         );
-        // The margin stands in for the blank line that separated the subject
-        // from the author row when the metadata was one text block.
-        meta_col = meta_col.with_child(Container::new(author_row).with_margin_top(size).finish());
+        meta_col = meta_col.with_child(
+            Container::new(with_avatar(
+                &c.author_name,
+                &c.author_email,
+                22.,
+                author_row,
+                appearance,
+            ))
+            .with_margin_top(10.)
+            .finish(),
+        );
         // Add a row only when the committer differs from the author
         // (cherry-pick / rebase / amend, etc.).
         if detail.committer_name != c.author_name {
-            meta_col = meta_col.with_child(render_identity_row(
-                format!(
-                    "committed by {} · {}",
-                    detail.committer_name,
-                    detail_time(detail.committer_time)
-                ),
+            let committer_label = format!(
+                "{} committed · {}",
+                detail.committer_name,
+                detail_time(detail.committer_time)
+            );
+            let committer_row = render_identity_row(
+                committer_label,
+                detail.committer_name.chars().count(),
                 format!("{} <{}>", detail.committer_name, detail.committer_email),
                 committer_mouse_states,
                 selection_handles,
                 &selected_text,
                 appearance,
-            ));
-        }
-    }
-
-    // ---- Segment 2: full hash (dimmed) + body (selectable) ----
-    // Body: the full message with the first line (used as the subject) removed;
-    // if empty, append nothing.
-    let mut tail_text = commit.map(|c| c.hash.clone()).unwrap_or_default();
-    let hash_chars = tail_text.chars().count();
-    let body = detail_message_body(&detail.message);
-    if !body.is_empty() {
-        if !tail_text.is_empty() {
-            tail_text.push_str("\n\n");
-        }
-        tail_text.push_str(&body);
-    }
-    if !tail_text.is_empty() {
-        let mut tail = Text::new(tail_text, font, size)
-            .with_color(fg)
-            .with_selectable(true);
-        if hash_chars > 0 {
-            tail = tail.with_single_highlight(
-                Highlight::new().with_foreground_color(dim),
-                (0..hash_chars).collect(),
+            );
+            meta_col = meta_col.with_child(
+                Container::new(with_avatar(
+                    &detail.committer_name,
+                    &detail.committer_email,
+                    16.,
+                    committer_row,
+                    appearance,
+                ))
+                .with_margin_top(4.)
+                .with_padding_left(3.)
+                .finish(),
             );
         }
-        // Without a commit (the uncommitted row) there are no author/hash rows
-        // above, so the body needs the blank-line margin under the subject
-        // itself.
-        let margin_top = if commit.is_some() { 0. } else { size };
+        meta_col = meta_col.with_child(
+            Container::new(render_hash_chips(c, hash_mouse_states, appearance))
+                .with_margin_top(8.)
+                .finish(),
+        );
+    }
+
+    // ---- Segment 2: the message body (selectable) ----
+    let body = detail_message_body(&detail.message);
+    if !body.is_empty() {
+        let tail = Text::new(body, font, size)
+            .with_color(fg)
+            .with_selectable(true);
+        let margin_top = size;
         meta_col = meta_col.with_child(
             Container::new(detail_selection_area(
                 tail.finish(),
@@ -3880,7 +3801,14 @@ fn render_detail_body(
             .finish(),
         );
     }
-    let selectable_meta = meta_col.finish();
+    let mut selectable_meta = Container::new(meta_col.finish());
+    // A stripe in the commit's lane color ties the details to its row in the graph.
+    if let Some(color) = accent {
+        selectable_meta = selectable_meta
+            .with_border(Border::left(3.).with_border_fill(color))
+            .with_padding_left(10.);
+    }
+    let selectable_meta = selectable_meta.finish();
 
     // ---- File area: top divider line + summary (N files changed / total
     // additions and deletions) + file rows ----
@@ -3899,13 +3827,31 @@ fn render_detail_body(
         .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
         .with_cross_axis_alignment(CrossAxisAlignment::Center)
         .with_child(
-            Text::new_inline(format!("{} files changed", detail.files.len()), font, size)
-                .with_color(dim)
+            Text::new_inline(
+                format!(
+                    "{} file{} changed",
+                    detail.files.len(),
+                    if detail.files.len() == 1 { "" } else { "s" }
+                ),
+                font,
+                size,
+            )
+            .with_color(dim)
+            .finish(),
+        )
+        .with_child(
+            Flex::row()
+                .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                .with_child(
+                    Container::new(render_change_bar(total_add, total_del, appearance))
+                        .with_padding_right(8.)
+                        .finish(),
+                )
+                .with_child(render_diff_counts(
+                    total_add, total_del, add_width, del_width, appearance,
+                ))
                 .finish(),
         )
-        .with_child(render_diff_counts(
-            total_add, total_del, add_width, del_width, appearance,
-        ))
         .finish();
 
     // Don't virtualize the file list: a single commit has a limited number of
@@ -3929,6 +3875,7 @@ fn render_detail_body(
                 render_file_tree_row(
                     Some(expanded),
                     Icon::Folder,
+                    None,
                     &name,
                     depth,
                     None,
@@ -3948,6 +3895,7 @@ fn render_detail_body(
                 render_file_tree_row(
                     None,
                     Icon::File,
+                    Some(file.status),
                     &name,
                     depth,
                     Some((file.additions, file.deletions)),
@@ -3974,22 +3922,6 @@ fn render_detail_body(
                 .with_vertical_padding(6.)
                 .finish(),
         );
-    // Ref badges (when a branch / tag / HEAD points at this commit): in the
-    // narrow panel they take their own row, placed between the metadata and the
-    // file area.
-    if let Some(c) = commit {
-        if !c.refs.is_empty() {
-            let mut chips = Flex::row().with_cross_axis_alignment(CrossAxisAlignment::Center);
-            for ref_label in &c.refs {
-                chips = chips.with_child(render_ref_badge(ref_label, None, appearance));
-            }
-            content = content.with_child(
-                Container::new(chips.finish())
-                    .with_padding_bottom(4.)
-                    .finish(),
-            );
-        }
-    }
     content = content.with_child(files_section);
 
     // The overlay scrollbar sits 8px in from the content's right edge, so leave
@@ -4016,6 +3948,172 @@ fn render_detail_body(
         .finish()
 }
 
+/// `child` with a locally drawn initials avatar to its left.
+fn with_avatar(
+    name: &str,
+    email: &str,
+    diameter: f32,
+    child: Box<dyn Element>,
+    appearance: &Appearance,
+) -> Box<dyn Element> {
+    Flex::row()
+        .with_cross_axis_alignment(CrossAxisAlignment::Center)
+        .with_child(
+            Container::new(super::avatar::render_initials_avatar(
+                name, email, diameter, appearance,
+            ))
+            .with_margin_right(8.)
+            .finish(),
+        )
+        .with_child(child)
+        .finish()
+}
+
+/// `commit <short>` (click copies the full hash) followed by one `parent <short>` chip per
+/// parent (click jumps to it).
+fn render_hash_chips(
+    commit: &CommitNode,
+    mouse_states: &[MouseStateHandle],
+    appearance: &Appearance,
+) -> Box<dyn Element> {
+    let chip = |label: &str, hash: &str, action: GitGraphAction, state: MouseStateHandle| {
+        let theme = appearance.theme();
+        let dim: ColorU = theme.sub_text_color(theme.background()).into();
+        let fg: ColorU = theme.foreground().into();
+        let label = label.to_string();
+        let short: String = hash.chars().take(8).collect();
+        Hoverable::new(state, move |mouse| {
+            let bg = if mouse.is_hovered() {
+                internal_colors::fg_overlay_7(theme)
+            } else {
+                internal_colors::fg_overlay_4(theme)
+            };
+            Container::new(
+                Flex::row()
+                    .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                    .with_child(
+                        Text::new_inline(
+                            label.clone(),
+                            appearance.ui_font_family(),
+                            appearance.ui_font_size() - 1.,
+                        )
+                        .with_color(dim)
+                        .finish(),
+                    )
+                    .with_child(
+                        Container::new(
+                            Text::new_inline(
+                                short.clone(),
+                                appearance.monospace_font_family(),
+                                appearance.ui_font_size() - 1.,
+                            )
+                            .with_color(fg)
+                            .finish(),
+                        )
+                        .with_padding_left(5.)
+                        .finish(),
+                    )
+                    .finish(),
+            )
+            .with_background(bg)
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.)))
+            .with_horizontal_padding(6.)
+            .with_vertical_padding(2.)
+            .finish()
+        })
+        .on_click(move |ctx, _, _| ctx.dispatch_typed_action(action.clone()))
+        .finish()
+    };
+    let state = |i: usize| mouse_states.get(i).cloned().unwrap_or_default();
+    let mut chips = vec![chip(
+        "commit",
+        &commit.hash,
+        GitGraphAction::CopyToClipboard(commit.hash.clone()),
+        state(0),
+    )];
+    for (i, parent) in commit
+        .parents
+        .iter()
+        .take(DETAIL_HASH_CHIPS - 1)
+        .enumerate()
+    {
+        chips.push(chip(
+            "parent",
+            parent,
+            GitGraphAction::SelectCommitByHash(parent.clone()),
+            state(i + 1),
+        ));
+    }
+    Wrap::row()
+        .with_spacing(6.)
+        .with_run_spacing(4.)
+        .with_children(chips)
+        .finish()
+}
+
+/// A green/red bar splitting a fixed width by the share of added vs deleted lines.
+fn render_change_bar(additions: u32, deletions: u32, appearance: &Appearance) -> Box<dyn Element> {
+    const WIDTH: f32 = 60.;
+    let total = additions + deletions;
+    if total == 0 {
+        return Empty::new().finish();
+    }
+    let added_width = WIDTH * additions as f32 / total as f32;
+    let segment = |width: f32, color: ColorU| {
+        Container::new(
+            ConstrainedBox::new(Empty::new().finish())
+                .with_width(width)
+                .with_height(6.)
+                .finish(),
+        )
+        .with_background_color(color)
+        .finish()
+    };
+    Container::new(
+        Flex::row()
+            .with_child(segment(added_width, add_color(appearance)))
+            .with_child(segment(WIDTH - added_width, remove_color(appearance)))
+            .finish(),
+    )
+    .with_corner_radius(CornerRadius::with_all(Radius::Pixels(3.)))
+    .finish()
+}
+
+/// A one-letter file status (A / M / D / R) in a colored square, in place of the file icon.
+fn render_status_badge(status: FileStatus, appearance: &Appearance) -> Box<dyn Element> {
+    let (letter, color) = match status {
+        FileStatus::Added => ("A", add_color(appearance)),
+        FileStatus::Modified => ("M", ColorU::new(0xe2, 0xb3, 0x40, 0xff)),
+        FileStatus::Deleted => ("D", remove_color(appearance)),
+        FileStatus::Renamed => ("R", ColorU::new(0x5a, 0xa9, 0xe6, 0xff)),
+    };
+    Container::new(
+        ConstrainedBox::new(
+            Container::new(
+                Align::new(
+                    Text::new_inline(
+                        letter.to_string(),
+                        appearance.monospace_font_family(),
+                        appearance.ui_font_size() - 2.,
+                    )
+                    .with_color(color)
+                    .with_style(Properties::default().weight(Weight::Bold))
+                    .finish(),
+                )
+                .finish(),
+            )
+            .with_background_color(ColorU { a: 0x2e, ..color })
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(3.)))
+            .finish(),
+        )
+        .with_width(FILE_TREE_ICON_SIZE)
+        .with_height(FILE_TREE_ICON_SIZE)
+        .finish(),
+    )
+    .with_margin_right(8.)
+    .finish()
+}
+
 /// Renders one clickable row of the detail file tree, in the same form as the
 /// Project Explorer: the depth indent + a disclosure chevron column (down =
 /// expanded, right = collapsed; empty for a file leaf) + a type icon (folder for
@@ -4034,6 +4132,7 @@ fn render_detail_body(
 fn render_file_tree_row(
     is_expanded: Option<bool>,
     icon: Icon,
+    status: Option<FileStatus>,
     name: &str,
     depth: usize,
     counts: Option<(u32, u32)>,
@@ -4102,10 +4201,12 @@ fn render_file_tree_row(
                     .finish(),
             );
         }
-        row = row
-            .with_child(chevron_col)
-            .with_child(icon_col)
-            .with_child(name_text);
+        row = row.with_child(chevron_col);
+        match status {
+            Some(status) => row = row.with_child(render_status_badge(status, appearance)),
+            None => row = row.with_child(icon_col),
+        }
+        row = row.with_child(name_text);
         // Files show their `+adds -dels` right-aligned into a trailing column
         // (padded to the commit-wide digit counts so `+`/`-` line up across
         // rows); directories show none.
@@ -4145,6 +4246,13 @@ impl TypedActionView for GitGraphView {
     fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
         match action {
             GitGraphAction::SelectCommit(index) => self.select_commit(*index, ctx),
+            GitGraphAction::SelectCommitByHash(hash) => {
+                if let Some(index) = self.commits.iter().position(|c| &c.hash == hash) {
+                    self.select_commit(index, ctx);
+                    self.list_state
+                        .scroll_to(index + usize::from(self.uncommitted_count > 0));
+                }
+            }
             GitGraphAction::SelectUncommitted => self.select_uncommitted(ctx),
             GitGraphAction::SelectRepository(index) => self.select_repository(*index, ctx),
             GitGraphAction::ToggleBranchFilter => {

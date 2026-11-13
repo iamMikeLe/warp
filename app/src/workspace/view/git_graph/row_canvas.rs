@@ -91,8 +91,8 @@ pub(crate) struct GitGraphRowCanvas {
     lane_count: usize,
     /// Draw the node as a hollow ring instead of a filled dot — used only for
     /// the synthetic "uncommitted changes" row (which reads as "not a real
-    /// commit"). The HEAD "you are here" marker is drawn next to the branch pill
-    /// instead (see `render_ref_badge`), not on the lane.
+    /// commit"). The current branch is marked on its ref pill (see `columns::ref_pill`), not on
+    /// the lane.
     hollow: bool,
     /// Width set by the Graph column (see `columns.rs`); `None` sizes to the
     /// lane count. Either way the Phase 1 cap still applies.

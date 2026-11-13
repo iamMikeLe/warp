@@ -212,6 +212,7 @@ fn parse_commit_detail_extracts_header_and_files() {
             path: "src/main.rs".to_string(),
             additions: 3,
             deletions: 1,
+            status: FileStatus::Modified,
         }
     );
     // Binary files ("-") are treated as 0 insertions/deletions.
@@ -221,6 +222,7 @@ fn parse_commit_detail_extracts_header_and_files() {
             path: "logo.png".to_string(),
             additions: 0,
             deletions: 0,
+            status: FileStatus::Modified,
         }
     );
 }
@@ -611,4 +613,27 @@ fn body_preview_keeps_ordinary_colon_lines() {
         "Note: this is prose"
     );
     assert_eq!(first_body_line("# Conflicts:\n#\tfile.rs"), "# Conflicts:");
+}
+
+#[test]
+fn parse_commit_detail_reads_file_statuses_from_summary() {
+    let output = format!(
+        "C{US}c@example.com{US}1700000000{US}Subject{RS}\n\
+         5\t0\tsrc/new.rs\n\
+         0\t7\tsrc/gone.rs\n\
+         2\t1\tsrc/kept.rs\n\
+         1\t1\tsrc/{{old => moved}}/x.rs\n\
+         \x20create mode 100644 src/new.rs\n\
+         \x20delete mode 100644 src/gone.rs\n\
+         \x20rename src/{{old => moved}}/x.rs (90%)\n",
+        US = UNIT_SEP,
+        RS = RECORD_SEP,
+    );
+    let detail = parse_commit_detail(&output);
+    let status = |path: &str| detail.files.iter().find(|f| f.path == path).unwrap().status;
+    assert_eq!(detail.files.len(), 4);
+    assert_eq!(status("src/new.rs"), FileStatus::Added);
+    assert_eq!(status("src/gone.rs"), FileStatus::Deleted);
+    assert_eq!(status("src/kept.rs"), FileStatus::Modified);
+    assert_eq!(status("src/moved/x.rs"), FileStatus::Renamed);
 }

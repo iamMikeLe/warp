@@ -592,12 +592,23 @@ pub(crate) async fn load_working_tree_status(repo_root: &Path) -> Result<usize> 
     Ok(parse_status_count(&stdout))
 }
 
+/// How a commit changed a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FileStatus {
+    Added,
+    #[default]
+    Modified,
+    Deleted,
+    Renamed,
+}
+
 /// A single changed file in a commit, with its insertion/deletion counts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ChangedFile {
     pub path: String,
     pub additions: u32,
     pub deletions: u32,
+    pub status: FileStatus,
 }
 
 /// Details of the selected commit: committer info, full commit message, and the
@@ -619,6 +630,7 @@ pub(crate) async fn load_commit_detail(repo_root: &Path, hash: &str) -> Result<C
     let args = [
         "show",
         "--numstat",
+        "--summary",
         "--no-color",
         "--format=%cn%x1f%ce%x1f%ct%x1f%B%x1e",
         hash,
@@ -627,7 +639,7 @@ pub(crate) async fn load_commit_detail(repo_root: &Path, hash: &str) -> Result<C
     Ok(parse_commit_detail(&stdout))
 }
 
-/// Parse the output of `git show --numstat --format=%cn%x1f%ce%x1f%ct%x1f%B%x1e`.
+/// Parse the output of `git show --numstat --summary --format=%cn%x1f%ce%x1f%ct%x1f%B%x1e`.
 pub(crate) fn parse_commit_detail(stdout: &str) -> CommitDetail {
     let (header, numstat) = stdout.split_once(RECORD_SEP).unwrap_or((stdout, ""));
     let mut fields = header.splitn(4, UNIT_SEP);
@@ -639,12 +651,47 @@ pub(crate) fn parse_commit_detail(stdout: &str) -> CommitDetail {
         .unwrap_or(0);
     let message = fields.next().unwrap_or("").trim().to_string();
 
+    let mut files = parse_numstat(numstat);
+    apply_summary(&mut files, numstat);
     CommitDetail {
         committer_name,
         committer_email,
         committer_time,
         message,
-        files: parse_numstat(numstat),
+        files,
+    }
+}
+
+/// Applies the file statuses from `--summary` lines (` create mode 100644 path`,
+/// ` delete mode …`, ` rename a/{x => y}/c (90%)`) to files parsed from the same output's
+/// `--numstat` lines. Files without a summary line stay [`FileStatus::Modified`].
+fn apply_summary(files: &mut [ChangedFile], output: &str) {
+    for line in output.lines() {
+        let line = line.trim();
+        let (status, path) = if let Some(rest) = line.strip_prefix("create mode ") {
+            (
+                FileStatus::Added,
+                rest.split_once(' ').map(|(_, path)| path.to_string()),
+            )
+        } else if let Some(rest) = line.strip_prefix("delete mode ") {
+            (
+                FileStatus::Deleted,
+                rest.split_once(' ').map(|(_, path)| path.to_string()),
+            )
+        } else if let Some(rest) = line.strip_prefix("rename ") {
+            let without_similarity = rest.rsplit_once(" (").map_or(rest, |(path, _)| path);
+            (
+                FileStatus::Renamed,
+                Some(rename_target_path(without_similarity)),
+            )
+        } else {
+            continue;
+        };
+        if let Some(path) = path
+            && let Some(file) = files.iter_mut().find(|f| f.path == path)
+        {
+            file.status = status;
+        }
     }
 }
 
@@ -689,6 +736,7 @@ fn parse_numstat(stdout: &str) -> Vec<ChangedFile> {
                 // Binary files report "-" in these columns; treat as 0.
                 additions: additions.parse::<u32>().unwrap_or(0),
                 deletions: deletions.parse::<u32>().unwrap_or(0),
+                status: FileStatus::Modified,
             })
         })
         .collect()
@@ -854,11 +902,14 @@ pub(crate) async fn load_file_diff_at_commit(
 /// dedicated "Uncommitted Changes" header instead.
 #[cfg(not(target_family = "wasm"))]
 pub(crate) async fn load_uncommitted_detail(repo_root: &Path) -> Result<CommitDetail> {
-    let numstat =
-        warp_util::git::run_git_command(repo_root, &["diff", "HEAD", "--numstat", "--no-color"])
-            .await
-            .unwrap_or_default();
+    let numstat = warp_util::git::run_git_command(
+        repo_root,
+        &["diff", "HEAD", "--numstat", "--summary", "--no-color"],
+    )
+    .await
+    .unwrap_or_default();
     let mut files = parse_numstat(&numstat);
+    apply_summary(&mut files, &numstat);
     // Untracked files aren't part of `git diff HEAD`; list them and diff each
     // against an empty base so its lines count as additions (a new file is all
     // additions, no deletions; binary → 0, like `parse_numstat`).
@@ -888,6 +939,7 @@ pub(crate) async fn load_uncommitted_detail(repo_root: &Path) -> Result<CommitDe
             path: path.to_string(),
             additions,
             deletions: 0,
+            status: FileStatus::Added,
         });
     }
     Ok(CommitDetail {
