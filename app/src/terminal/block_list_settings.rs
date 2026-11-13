@@ -46,4 +46,14 @@ define_settings_group!(BlockListSettings, settings: [
        toml_path: "appearance.blocks.show_block_dividers",
        description: "Whether to show dividers between terminal blocks.",
    }
+   alternate_block_backgrounds: AlternateBlockBackgrounds {
+       type: bool,
+       default: true,
+       supported_platforms: SupportedPlatforms::ALL,
+       sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+       surface: settings::SettingSurfaces::GUI,
+       private: false,
+       toml_path: "appearance.blocks.alternate_block_backgrounds",
+       description: "Whether every other terminal block gets a subtle background tint.",
+   }
 ]);

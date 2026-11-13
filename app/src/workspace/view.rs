@@ -23412,6 +23412,12 @@ impl Workspace {
             context.set.insert(flags::BLOCK_DIVIDERS_CONTEXT_FLAG);
         }
 
+        if *block_list_settings.alternate_block_backgrounds.value() {
+            context
+                .set
+                .insert(flags::ALTERNATE_BLOCK_BACKGROUNDS_CONTEXT_FLAG);
+        }
+
         if *safe_mode_settings.safe_mode_enabled.value() {
             context.set.insert(flags::SAFE_MODE_FLAG);
         }

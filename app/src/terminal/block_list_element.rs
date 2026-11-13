@@ -37,6 +37,7 @@ use warpui::{
     LayoutContext, ModelHandle, PaintContext, SingletonEntity as _, SizeConstraint,
 };
 
+use super::block_list_settings::BlockListSettings;
 use super::block_list_viewport::{ClampingMode, InputMode, ScrollPosition, ViewportState};
 use super::blockgrid_renderer::{BlockGridRenderer, GridRenderParams};
 use super::find::{BlockFindRenderData, TerminalFindModel};
@@ -100,6 +101,10 @@ const COMMAND_ALPHA: u8 = 255;
 
 const SEPARATOR_TO_MONOSPACE_FONT_SIZE_RATIO: f32 = 0.8;
 const SEPARATOR_LEFT_OFFSET: f32 = 20.;
+
+/// Opacity (percent) of the foreground overlay on alternating blocks: just enough to see where a
+/// block starts and ends without competing with the failed-block tint.
+const ALTERNATE_BLOCK_TINT_OPACITY: u8 = 4;
 
 /// Border widths for selected blocks
 #[derive(Debug, Clone, Copy)]
@@ -2399,6 +2404,7 @@ impl BlockListElement {
         grid_origin: Vector2F,
         block: &Block,
         is_selected_by_anyone: bool,
+        is_tinted: bool,
         bounds: RectF,
         warp_theme: &WarpTheme,
         block_borders_enabled: bool,
@@ -2417,6 +2423,19 @@ impl BlockListElement {
                     Vector2F::new(bounds.width(), block_height),
                 ))
                 .with_background(warp_theme.restored_blocks_overlay());
+        }
+
+        if is_tinted {
+            ctx.scene
+                .draw_rect_with_hit_recording(RectF::new(
+                    grid_origin,
+                    Vector2F::new(bounds.width(), block_height),
+                ))
+                .with_background(
+                    warp_theme
+                        .foreground()
+                        .with_opacity(ALTERNATE_BLOCK_TINT_OPACITY),
+                );
         }
 
         let mut did_render_ai_stripe = false;
@@ -2513,11 +2532,16 @@ impl BlockListElement {
         ctx: &mut PaintContext,
         app: &AppContext,
     ) {
+        // Keyed on the block's index (not its position on screen) so the pattern doesn't shift
+        // while scrolling.
+        let is_tinted =
+            *BlockListSettings::as_ref(app).alternate_block_backgrounds && block_index.0 % 2 == 1;
         Self::draw_block_background(
             block_grid_params.grid_render_params.cell_size,
             *grid_origin,
             block,
             is_current_block_selected_by_anyone,
+            is_tinted,
             block_grid_params.bounds,
             &block_grid_params.grid_render_params.warp_theme,
             block_borders_enabled,
