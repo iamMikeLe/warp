@@ -4081,7 +4081,7 @@ fn render_change_bar(additions: u32, deletions: u32, appearance: &Appearance) ->
     .finish()
 }
 
-/// A one-letter file status (A / M / D / R) in a colored square, in place of the file icon.
+/// A one-letter file status (A / M / D / R) in a colored square, shown after the file name.
 fn render_status_badge(status: FileStatus, appearance: &Appearance) -> Box<dyn Element> {
     let (letter, color) = match status {
         FileStatus::Added => ("A", add_color(appearance)),
@@ -4112,7 +4112,7 @@ fn render_status_badge(status: FileStatus, appearance: &Appearance) -> Box<dyn E
         .with_height(FILE_TREE_ICON_SIZE)
         .finish(),
     )
-    .with_margin_right(8.)
+    .with_margin_left(8.)
     .finish()
 }
 
@@ -4189,9 +4189,14 @@ fn render_file_tree_row(
         .with_margin_right(4.)
         .finish();
 
-        // Type icon column: folder for directories, file for leaves.
+        // Type icon column: the file-type icon for files, the folder glyph for directories.
+        let type_icon = is_expanded
+            .is_none()
+            .then(|| crate::code::icon_from_file_path(&name, appearance))
+            .flatten()
+            .unwrap_or_else(|| icon.to_warpui_icon(color.into()).finish());
         let icon_col = Container::new(
-            ConstrainedBox::new(icon.to_warpui_icon(color.into()).finish())
+            ConstrainedBox::new(type_icon)
                 .with_width(FILE_TREE_ICON_SIZE)
                 .with_height(FILE_TREE_ICON_SIZE)
                 .finish(),
@@ -4222,11 +4227,10 @@ fn render_file_tree_row(
             row = row.with_child(render_indent_guide(appearance));
         }
         row = row.with_child(chevron_col);
-        match status {
-            Some(status) => row = row.with_child(render_status_badge(status, appearance)),
-            None => row = row.with_child(icon_col),
+        row = row.with_child(icon_col).with_child(name_text);
+        if let Some(status) = status {
+            row = row.with_child(render_status_badge(status, appearance));
         }
-        row = row.with_child(name_text);
         // Files show their `+adds -dels` right-aligned into a trailing column
         // (padded to the commit-wide digit counts so `+`/`-` line up across
         // rows); directories show none.
