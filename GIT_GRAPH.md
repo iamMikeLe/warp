@@ -56,6 +56,17 @@ I picked it up from there. My work on top of it:
   terminal block backgrounds, easier pane resizing, colored file icons, and rainbow indent.
 - **`daily`**: everything combined; the build I use day to day.
 
+Rules for working on this fork (for me and for any coding agent working in it):
+
+- **Each feature gets its own branch.** Git Graph work goes on `git-graph`; anything that isn't
+  the Git Graph goes on its own branch: stacked on `git-graph` if it needs it (like `worktrees`),
+  otherwise based on upstream (like `ui-tweaks`). Then merge it into `daily`. Never commit
+  non-Git-Graph changes to `git-graph`, so it stays ready for an upstream PR.
+- **Build and run from `daily`.** Code that needs two features together (e.g. colored folder
+  icons in the Git Graph details) goes on `daily` only.
+- **Merge, don't rebase,** branches that are already pushed. A rewrite needs a force push and
+  should be a deliberate decision.
+
 ## Building and running (macOS)
 
 Prerequisites: Xcode, Rust via `rustup` (the toolchain version is pinned in
@@ -78,9 +89,15 @@ left (or the left panel button when vertical tabs are off), then the branch icon
 
 ## Staying up to date with upstream
 
+Merge `upstream/master` into the branches based on upstream, then pass the result down the
+stack:
+
 ```sh
 git fetch upstream
-git merge upstream/master   # merge, don't rebase: the branch carries the original fork's merge history
+git switch git-graph && git merge upstream/master   # merge, don't rebase: the branch carries the original fork's merge history
+git switch ui-tweaks && git merge upstream/master
+git switch worktrees && git merge git-graph
+git switch daily     && git merge worktrees ui-tweaks
 ```
 
 ## License
