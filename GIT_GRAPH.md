@@ -102,14 +102,18 @@ brew install protobuf pkgconf
 cargo install --locked cargo-bundle@0.11.0
 ```
 
-Build and launch:
+Build and launch (from `daily` for everything, or from a single feature branch):
 
 ```sh
+git switch daily && git pull
+pkill -f WarpOss    # close a copy that's already running, so you don't test an old build
 WARP_SKIP_COMMON_SKILLS_INSTALL=1 ./script/run --features git_graph,open_directory_in_external_editor
 ```
 
+The first build takes a while; later ones only rebuild what changed. `git_graph` turns on the Git
+Graph and Worktrees panels, and `WARP_SKIP_COMMON_SKILLS_INSTALL=1` skips an interactive prompt.
 This opens **WarpOss**, which keeps its own settings in `~/.warp-oss` and doesn't touch an
-installed Warp. Open the Git Graph from the **Tools panel**, using the tool icon at the top
+installed Warp. Its log is `~/Library/Logs/warp-oss.log`. Open the Git Graph from the **Tools panel**, using the tool icon at the top
 left (or the left panel button when vertical tabs are off), then the branch icon.
 
 ## Staying up to date with upstream
@@ -118,12 +122,18 @@ Merge `upstream/master` into the branches based on upstream, then pass the resul
 stack:
 
 ```sh
+git remote add upstream https://github.com/warpdotdev/warp.git   # once per clone
 git fetch upstream
-git switch git-graph && git merge upstream/master   # merge, don't rebase: the branch carries the original fork's merge history
-git switch ui-tweaks && git merge upstream/master
-git switch worktrees && git merge git-graph
-git switch daily     && git merge worktrees ui-tweaks
+git switch git-graph   && git merge upstream/master   # merge, don't rebase: the branch carries the original fork's merge history
+git switch ui-tweaks   && git merge upstream/master
+git switch pane-layout && git merge upstream/master
+git switch worktrees   && git merge git-graph
+git switch daily       && git merge worktrees ui-tweaks pane-layout
+git push origin git-graph ui-tweaks pane-layout worktrees daily
 ```
+
+If a build fails after an upstream merge, run `./script/bootstrap --skip-common-skills` once to
+install any new build dependencies.
 
 ## License
 
