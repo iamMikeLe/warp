@@ -4259,12 +4259,13 @@ fn render_file_tree_row(
         .with_margin_right(4.)
         .finish();
 
-        // Type icon column: the file-type icon for files, the folder glyph for directories.
-        let type_icon = is_expanded
-            .is_none()
-            .then(|| crate::code::icon_from_file_path(&name, appearance))
-            .flatten()
-            .unwrap_or_else(|| icon.to_warpui_icon(color.into()).finish());
+        // Type icon column: the colored type icon when enabled, otherwise the monochrome
+        // folder / file glyph.
+        let type_icon = match is_expanded {
+            Some(expanded) => crate::code::material_icons::folder_icon(&name, expanded, appearance),
+            None => crate::code::icon_from_file_path(&name, appearance),
+        }
+        .unwrap_or_else(|| icon.to_warpui_icon(color.into()).finish());
         let icon_col = Container::new(
             ConstrainedBox::new(type_icon)
                 .with_width(FILE_TREE_ICON_SIZE)
