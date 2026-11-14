@@ -4,7 +4,10 @@
 # features), signs it with this Mac's own certificate, and wraps it in a drag-to-Applications DMG.
 # For personal use: the app isn't notarized, so on another Mac it needs right-click > Open once.
 #
-# Usage: script/macos/personal_dmg [output.dmg]   (default: ~/Desktop/WarpOss.dmg)
+# Usage: script/macos/personal_dmg [--name AppName] [output.dmg]
+#   --name      the app's name in Finder, the Dock and the menu bar (default: WarpOss). Only the
+#               displayed name changes: settings stay in ~/.warp-oss.
+#   output.dmg  default: ~/Desktop/<AppName>.dmg
 #
 # One-time setup beyond the normal build tools: cargo install --locked cargo-about@0.8.4
 
@@ -16,8 +19,27 @@ if ! command -v cargo-about > /dev/null; then
   exit 1
 fi
 
+APP_NAME="WarpOss"
+DMG_PATH=""
+while (( $# )); do
+  case "$1" in
+    --name)
+      APP_NAME="${2:?--name needs a value}"
+      shift 2
+      ;;
+    *)
+      DMG_PATH="$1"
+      shift
+      ;;
+  esac
+done
+if [[ ! "$APP_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9\ ._-]*$ ]]; then
+  echo "Use letters, digits, spaces, dots, dashes or underscores in --name." >&2
+  exit 1
+fi
+DMG_PATH="${DMG_PATH:-$HOME/Desktop/$APP_NAME.dmg}"
+
 cd "$(dirname "$0")/../.."
-DMG_PATH="${1:-$HOME/Desktop/WarpOss.dmg}"
 
 case "$(uname -m)" in
   arm64) TARGET="aarch64-apple-darwin" ;;
@@ -41,10 +63,19 @@ if [[ ! "$APP/Contents/MacOS/warp-oss" -nt "$STAMP" ]]; then
 fi
 
 STAGE="$(mktemp -d)"
-cp -R "$APP" "$STAGE/"
+STAGED_APP="$STAGE/$APP_NAME.app"
+cp -R "$APP" "$STAGED_APP"
+if [[ "$APP_NAME" != "WarpOss" ]]; then
+  plutil -replace CFBundleName -string "$APP_NAME" "$STAGED_APP/Contents/Info.plist"
+  plutil -replace CFBundleDisplayName -string "$APP_NAME" "$STAGED_APP/Contents/Info.plist"
+  # Editing Info.plist invalidates the signature; sign again the way script/bundle --selfsign
+  # does when there's no Apple Development certificate.
+  codesign --force --deep --options runtime --sign - \
+    --entitlements script/Debug-Entitlements.plist "$STAGED_APP"
+fi
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname WarpOss -srcfolder "$STAGE" -ov -format UDZO "$DMG_PATH"
+hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG_PATH"
 
 echo
 echo "Created $DMG_PATH"
-echo "Open it and drag WarpOss into Applications (quit a running WarpOss first)."
+echo "Open it and drag $APP_NAME into Applications (quit the running app first)."

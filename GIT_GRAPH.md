@@ -121,6 +121,7 @@ left (or the left panel button when vertical tabs are off), then the branch icon
 ```sh
 cargo install --locked cargo-about@0.8.4   # once: used for the bundled license file
 script/macos/personal_dmg                  # writes ~/Desktop/WarpOss.dmg
+script/macos/personal_dmg --name MyTerm    # same app shown as "MyTerm" (settings stay shared)
 ```
 
 Builds a release WarpOss for this Mac, signs it locally, and packages it
