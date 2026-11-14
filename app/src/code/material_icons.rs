@@ -3,9 +3,16 @@
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Deserialize;
-use warpui::AssetProvider as _;
+use warp_core::ui::theme::ColorScheme;
+use warpui::assets::asset_cache::AssetSource;
+use warpui::elements::{CacheOption, Image};
+use warpui::{AppContext, AssetProvider as _, Element, SingletonEntity as _};
+
+use crate::appearance::Appearance;
+use crate::settings::{CodeSettings, CodeSettingsChangedEvent};
 
 const MANIFEST_PATH: &str = "bundled/material_icons.json";
 
@@ -77,6 +84,55 @@ impl Icons {
 }
 
 static ICONS: LazyLock<Option<Icons>> = LazyLock::new(Icons::load);
+
+/// Mirrors [`CodeSettings::colored_file_icons`] so icon lookups that only have the `Appearance`
+/// (e.g. `crate::code::icon_from_file_path`) can honor it without an `AppContext`.
+static ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// Keeps [`ENABLED`] in sync with the setting and redraws open views when it changes.
+pub fn init(app: &mut AppContext) {
+    if !app.has_singleton_model::<CodeSettings>() {
+        return;
+    }
+    ENABLED.store(
+        *CodeSettings::as_ref(app).colored_file_icons,
+        Ordering::Relaxed,
+    );
+    app.subscribe_to_model(&CodeSettings::handle(app), |settings, event, ctx| {
+        if matches!(event, CodeSettingsChangedEvent::ColoredFileIcons { .. }) {
+            ENABLED.store(*settings.as_ref(ctx).colored_file_icons, Ordering::Relaxed);
+            ctx.invalidate_all_views();
+        }
+    });
+}
+
+fn is_light(appearance: &Appearance) -> bool {
+    appearance.theme().inferred_color_scheme() == ColorScheme::DarkOnLight
+}
+
+fn bundled_image(path: &'static str) -> Box<dyn Element> {
+    Image::new(AssetSource::Bundled { path }, CacheOption::BySize).finish()
+}
+
+/// The colored icon for a file, or `None` when colored icons are turned off.
+pub fn file_icon(file_name: &str, appearance: &Appearance) -> Option<Box<dyn Element>> {
+    if !ENABLED.load(Ordering::Relaxed) {
+        return None;
+    }
+    file_icon_path(file_name, is_light(appearance)).map(bundled_image)
+}
+
+/// The colored icon for a folder, or `None` when colored icons are turned off.
+pub fn folder_icon(
+    folder_name: &str,
+    expanded: bool,
+    appearance: &Appearance,
+) -> Option<Box<dyn Element>> {
+    if !ENABLED.load(Ordering::Relaxed) {
+        return None;
+    }
+    folder_icon_path(folder_name, expanded, is_light(appearance)).map(bundled_image)
+}
 
 /// Asset path of the icon for a file named `file_name`: an exact (case-insensitive) file name
 /// match first, then the longest matching extension (`test.ts` before `ts`), then the generic file

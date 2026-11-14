@@ -200,6 +200,22 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
 
     toggle_binding_pairs.push(
         ToggleSettingActionPair::new(
+            "colored file icons",
+            builder(SettingsAction::AppearancePageToggle(
+                AppearancePageAction::ToggleColoredFileIcons,
+            )),
+            context,
+            flags::COLORED_FILE_ICONS_CONTEXT_FLAG,
+        )
+        .is_supported_on_current_platform(
+            CodeSettings::as_ref(app)
+                .colored_file_icons
+                .is_supported_on_current_platform(),
+        ),
+    );
+
+    toggle_binding_pairs.push(
+        ToggleSettingActionPair::new(
             "alternating block backgrounds",
             builder(SettingsAction::AppearancePageToggle(
                 AppearancePageAction::ToggleAlternateBlockBackgrounds,
@@ -498,6 +514,7 @@ pub enum AppearancePageAction {
     ToggleJumpToBottomOfBlockButton,
     ToggleShowBlockDividers,
     ToggleAlternateBlockBackgrounds,
+    ToggleColoredFileIcons,
     ToggleCompactMode,
     ToggleCursorBlink,
     ToggleRespectSystemTheme,
@@ -639,6 +656,13 @@ impl TypedActionView for AppearanceSettingsPageView {
             ToggleJumpToBottomOfBlockButton => self.toggle_jump_to_bottom_of_block_button(ctx),
             ToggleShowBlockDividers => self.toggle_show_block_dividers(ctx),
             ToggleAlternateBlockBackgrounds => self.toggle_alternate_block_backgrounds(ctx),
+            ToggleColoredFileIcons => {
+                CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings.colored_file_icons.toggle_and_save_value(ctx));
+                });
+                // The Appearance page does not subscribe to CodeSettings.
+                ctx.notify();
+            }
             ToggleCompactMode => self.toggle_compact_mode(ctx),
             ToggleCursorBlink => self.toggle_cursor_blink(ctx),
             ToggleOpenWindowsAtCustomSize => self.toggle_open_windows_at_custom_size(ctx),
@@ -1449,6 +1473,7 @@ impl AppearanceSettingsPageView {
             tools_panel_widgets.push(Box::new(ToolsPanelGlobalSearchWidget::default()));
         }
         tools_panel_widgets.push(Box::new(ToolsPanelWarpDriveWidget::default()));
+        tools_panel_widgets.push(Box::new(ColoredFileIconsWidget::default()));
         if !tools_panel_widgets.is_empty() {
             categories.push(Category::new("Tools panel", tools_panel_widgets));
         }
@@ -4162,6 +4187,47 @@ impl SettingsWidget for ShowBlockDividersWidget {
                 })
                 .finish(),
             None,
+        )
+    }
+}
+
+#[derive(Default)]
+struct ColoredFileIconsWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for ColoredFileIconsWidget {
+    type View = AppearanceSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "colored file folder icons material icon theme project explorer"
+    }
+
+    fn render(
+        &self,
+        _view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        render_body_item::<AppearancePageAction>(
+            "Colored file icons".to_string(),
+            None,
+            LocalOnlyIconState::Hidden,
+            ToggleState::Enabled,
+            appearance,
+            appearance
+                .ui_builder()
+                .switch(self.switch_state.clone())
+                .check(*CodeSettings::as_ref(app).colored_file_icons)
+                .build()
+                .on_click(|evt_ctx, _app, _v2f| {
+                    evt_ctx.dispatch_typed_action(AppearancePageAction::ToggleColoredFileIcons);
+                })
+                .finish(),
+            Some(
+                "Type-specific colored icons for files and folders (Material Icon Theme)."
+                    .to_string(),
+            ),
         )
     }
 }

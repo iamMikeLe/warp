@@ -547,6 +547,7 @@ pub mod flags {
     pub const BLOCK_DIVIDERS_CONTEXT_FLAG: &str = "Block_Dividers_Enabled";
     pub const ALTERNATE_BLOCK_BACKGROUNDS_CONTEXT_FLAG: &str =
         "Alternate_Block_Backgrounds_Enabled";
+    pub const COLORED_FILE_ICONS_CONTEXT_FLAG: &str = "Colored_File_Icons_Enabled";
 
     pub const LOG_OUT_WARNING_MODAL: &str = "Log_Out_Warning_Modal";
     pub const SMART_SELECT_FLAG: &str = "Smart_Select_Enabled";

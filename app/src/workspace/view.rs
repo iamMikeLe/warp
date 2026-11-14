@@ -23412,6 +23412,10 @@ impl Workspace {
             context.set.insert(flags::BLOCK_DIVIDERS_CONTEXT_FLAG);
         }
 
+        if *CodeSettings::as_ref(app).colored_file_icons.value() {
+            context.set.insert(flags::COLORED_FILE_ICONS_CONTEXT_FLAG);
+        }
+
         if *block_list_settings.alternate_block_backgrounds.value() {
             context
                 .set
