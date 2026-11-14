@@ -79,6 +79,8 @@ I picked it up from there. My work on top of it:
 - **`pane-layout`**: split-pane tools, based directly on upstream Warp: collapse a pane to a thin
   strip without closing it, open files to the left so the terminal stays on the right, and a
   button to open a terminal in the current tab.
+- **`japanese-themes`**: Samurai (dark) and Sakura (light) themes in traditional Japanese colours,
+  based directly on upstream Warp.
 - **`daily`**: everything combined; the build I use day to day.
 
 Rules for working on this fork (for me and for any coding agent working in it):
@@ -127,9 +129,10 @@ git fetch upstream
 git switch git-graph   && git merge upstream/master   # merge, don't rebase: the branch carries the original fork's merge history
 git switch ui-tweaks   && git merge upstream/master
 git switch pane-layout && git merge upstream/master
+git switch japanese-themes && git merge upstream/master
 git switch worktrees   && git merge git-graph
-git switch daily       && git merge worktrees ui-tweaks pane-layout
-git push origin git-graph ui-tweaks pane-layout worktrees daily
+git switch daily       && git merge worktrees ui-tweaks pane-layout japanese-themes
+git push origin git-graph ui-tweaks pane-layout japanese-themes worktrees daily
 ```
 
 If a build fails after an upstream merge, run `./script/bootstrap --skip-common-skills` once to
