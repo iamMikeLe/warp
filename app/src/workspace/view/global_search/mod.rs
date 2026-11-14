@@ -1,9 +1,29 @@
 use warp_ripgrep::search::Submatch;
 use warp_util::local_or_remote_path::LocalOrRemotePath;
 
+#[derive(Clone, Copy, Debug, Default)]
 pub struct SearchConfig {
     pub use_regex: bool,
     pub use_case_sensitivity: bool,
+    pub use_whole_word: bool,
+}
+
+impl SearchConfig {
+    /// The regex ripgrep runs for `pattern`: escaped unless regex mode is on, and wrapped in word
+    /// boundaries for whole-word matching. Replace builds its matcher from the same string, so it
+    /// finds exactly the matches the search showed.
+    pub fn effective_pattern(&self, pattern: &str) -> String {
+        let pattern = if self.use_regex {
+            pattern.to_string()
+        } else {
+            regex::escape(pattern)
+        };
+        if self.use_whole_word {
+            format!(r"\b(?:{pattern})\b")
+        } else {
+            pattern
+        }
+    }
 }
 
 /// A single global search match: one line in one file, which may live on
@@ -23,4 +43,6 @@ pub struct GlobalSearchMatch {
 #[cfg_attr(not(target_family = "wasm"), path = "model.rs")]
 #[cfg_attr(target_family = "wasm", path = "model_wasm.rs")]
 pub mod model;
+#[cfg(not(target_family = "wasm"))]
+pub mod replace;
 pub mod view;

@@ -6,7 +6,6 @@ use anyhow::Result;
 use futures::StreamExt as _;
 use instant::Instant;
 use num_traits::SaturatingSub;
-use regex::escape;
 use remote_server::HostId;
 use remote_server::manager::{HostRequestError, RemoteServerManager, RipgrepSearchParams};
 use remote_server::proto::RipgrepSearchSuccess;
@@ -136,11 +135,7 @@ impl GlobalSearch {
         let search_id = self.next_search_id;
         self.next_search_id += 1;
 
-        let effective_pattern = if search_config.use_regex {
-            pattern
-        } else {
-            escape(&pattern)
-        };
+        let effective_pattern = search_config.effective_pattern(&pattern);
         let ignore_case = !search_config.use_case_sensitivity;
         let multiline = effective_pattern.contains('\n');
 
