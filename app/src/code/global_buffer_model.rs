@@ -915,29 +915,6 @@ impl GlobalBufferModel {
         }
     }
 
-    /// Whether `location` is open in a loaded buffer whose content differs from what was last
-    /// read from or saved to disk.
-    pub fn has_unsaved_changes(
-        &self,
-        location: &LocalOrRemotePath,
-        ctx: &warpui::AppContext,
-    ) -> bool {
-        let Some(state) = self
-            .location_to_id
-            .get_by_left(location)
-            .and_then(|file_id| self.buffers.get(file_id))
-        else {
-            return false;
-        };
-        let Some(base_version) = state.base_content_version() else {
-            return false;
-        };
-        state
-            .buffer
-            .upgrade(ctx)
-            .is_some_and(|buffer| !buffer.as_ref(ctx).version_match(&base_version))
-    }
-
     /// Get the base content version (last known on-disk version) for a tracked buffer.
     pub fn base_version(&self, file_id: FileId) -> Option<ContentVersion> {
         self.buffers
