@@ -551,6 +551,7 @@ pub mod flags {
     pub const QUIT_WARNING_MODAL: &str = "Quit_Warning_Modal";
     pub const BLOCK_DIVIDERS_CONTEXT_FLAG: &str = "Block_Dividers_Enabled";
     pub const SHOW_GIT_GRAPH_CONTEXT_FLAG: &str = "Show_Git_Graph_Enabled";
+    pub const SHOW_WORKTREES_CONTEXT_FLAG: &str = "Show_Worktrees_Enabled";
     pub const GIT_GRAPH_STASHES_CONTEXT_FLAG: &str = "Git_Graph_Stashes_Enabled";
     pub const GIT_GRAPH_GRAVATAR_CONTEXT_FLAG: &str = "Git_Graph_Gravatar_Enabled";
 

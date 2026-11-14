@@ -315,6 +315,7 @@ pub enum LeftPanelDisplayedTab {
     WarpDrive,
     ConversationListView,
     GitGraph,
+    Worktrees,
 }
 
 impl From<ToolPanelView> for LeftPanelDisplayedTab {
@@ -325,6 +326,7 @@ impl From<ToolPanelView> for LeftPanelDisplayedTab {
             ToolPanelView::WarpDrive => LeftPanelDisplayedTab::WarpDrive,
             ToolPanelView::ConversationListView => LeftPanelDisplayedTab::ConversationListView,
             ToolPanelView::GitGraph => LeftPanelDisplayedTab::GitGraph,
+            ToolPanelView::Worktrees => LeftPanelDisplayedTab::Worktrees,
         }
     }
 }

@@ -25,6 +25,25 @@ where many branches, worktrees, and stashes pile up quickly.
 - **Settings → Git:** show or hide the panel and stashes, opt in to Gravatar pictures, and set
   how deep to scan for repositories. The toggles are also in the Command Palette.
 
+## Worktrees panel
+
+A second tools-panel tab (the flowchart icon) for agent-heavy workflows where several worktrees
+branch off the same base:
+
+- **Flowchart:** every worktree of the current repository hangs under the branch it was created
+  from (read from the branch's reflog, with a fallback for `HEAD`-based worktrees), so a
+  `develop` checkout shows the worktrees made from it, nested further if one was made from
+  another.
+- **Agents:** each card counts the running Claude Code sessions inside that worktree and shows
+  each one's state (working, needs you, idle), read from Claude Code's local session files.
+  The card's accent and node turn green while an agent works and amber when one needs you.
+- **Git state:** branch, commits ahead of/behind its base, uncommitted changes, and the last
+  commit.
+- **Actions:** click a card to open a terminal tab in it; right-click to copy its path or branch,
+  remove it (with confirmation; git refuses dirty worktrees), or prune stale entries.
+- Agent states refresh every few seconds and git state about every 30 seconds, only while the
+  tab is open. Toggle the tab in Settings → Git or the Command Palette.
+
 ## Credits and what I've added
 
 The Git Graph panel was originally written by [@0xBB2B](https://github.com/0xBB2B)

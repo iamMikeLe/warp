@@ -29,7 +29,7 @@ pub(crate) mod menu;
 pub(crate) mod ops;
 pub(crate) mod row_canvas;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 pub(crate) mod view;
 
 #[cfg(not(target_family = "wasm"))]

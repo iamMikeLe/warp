@@ -25,6 +25,7 @@ pub(crate) mod tests;
 mod vertical_tabs;
 #[cfg(target_family = "wasm")]
 mod wasm_view;
+pub(crate) mod worktrees;
 
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -3275,7 +3276,11 @@ impl Workspace {
         });
 
         ctx.subscribe_to_model(&GitSettings::handle(ctx), |me, _, event, ctx| {
-            if matches!(event, GitSettingsChangedEvent::ShowGitGraph { .. }) {
+            if matches!(
+                event,
+                GitSettingsChangedEvent::ShowGitGraph { .. }
+                    | GitSettingsChangedEvent::ShowWorktrees { .. }
+            ) {
                 me.update_left_panel_available_views(ctx);
                 ctx.notify();
             }
@@ -4403,6 +4408,7 @@ impl Workspace {
                 LeftPanelDisplayedTab::WarpDrive => ToolPanelView::WarpDrive,
                 LeftPanelDisplayedTab::ConversationListView => ToolPanelView::ConversationListView,
                 LeftPanelDisplayedTab::GitGraph => ToolPanelView::GitGraph,
+                LeftPanelDisplayedTab::Worktrees => ToolPanelView::Worktrees,
             };
             lp.restore_active_view_from_snapshot(active_view, ctx);
             lp.set_active_pane_group(pane_group.clone(), &self.working_directories_model, ctx);
@@ -6808,6 +6814,9 @@ impl Workspace {
                         }
                     }
                 }
+            }
+            LeftPanelEvent::OpenDirectoryInNewTab(path) => {
+                self.open_directory_in_new_tab(path.clone(), ctx);
             }
             LeftPanelEvent::NewConversationInNewTab => {
                 self.add_terminal_tab_with_new_agent_view(ctx);
@@ -20928,6 +20937,7 @@ impl Workspace {
                         ToolPanelView::WarpDrive => "Warp Drive",
                         ToolPanelView::ConversationListView => "Agent conversations",
                         ToolPanelView::GitGraph => "Git Graph",
+                        ToolPanelView::Worktrees => "Worktrees",
                     }
                 } else {
                     "Tools panel"
@@ -20983,6 +20993,7 @@ impl Workspace {
                 ToolPanelView::WarpDrive => "Warp Drive",
                 ToolPanelView::ConversationListView => "Agent conversations",
                 ToolPanelView::GitGraph => "Git Graph",
+                ToolPanelView::Worktrees => "Worktrees",
             }
         } else {
             "Tools panel"
@@ -23524,6 +23535,9 @@ impl Workspace {
         if *git_settings.show_git_graph.value() {
             context.set.insert(flags::SHOW_GIT_GRAPH_CONTEXT_FLAG);
         }
+        if *git_settings.show_worktrees.value() {
+            context.set.insert(flags::SHOW_WORKTREES_CONTEXT_FLAG);
+        }
         if *git_settings.show_git_graph_stashes.value() {
             context.set.insert(flags::GIT_GRAPH_STASHES_CONTEXT_FLAG);
         }
@@ -24225,6 +24239,12 @@ impl Workspace {
             && *GitSettings::as_ref(ctx).show_git_graph.value()
         {
             views.push(ToolPanelView::GitGraph);
+        }
+        if cfg!(feature = "local_fs")
+            && FeatureFlag::GitGraph.is_enabled()
+            && *GitSettings::as_ref(ctx).show_worktrees.value()
+        {
+            views.push(ToolPanelView::Worktrees);
         }
         views
     }

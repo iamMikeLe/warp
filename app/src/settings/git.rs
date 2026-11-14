@@ -18,6 +18,18 @@ define_settings_group!(GitSettings, settings: [
         toml_path: "git.show_graph_panel",
         description: "Whether the Git Graph panel is shown in the tools panel.",
     },
+    // Whether the Worktrees panel (worktrees under their base branches, with the agents working in
+    // each) appears in the tools panel.
+    show_worktrees: ShowWorktrees {
+        type: bool,
+        default: true,
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
+        private: false,
+        toml_path: "git.show_worktrees_panel",
+        description: "Whether the Worktrees panel is shown in the tools panel.",
+    },
     // Whether stashes appear in the Git Graph, each attached directly above its base commit.
     show_git_graph_stashes: ShowGitGraphStashes {
         type: bool,

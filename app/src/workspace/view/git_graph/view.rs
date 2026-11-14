@@ -3502,7 +3502,7 @@ fn detail_time(unix_secs: i64) -> String {
     format!("{} · {absolute}", relative_time(now - unix_secs))
 }
 
-fn relative_time(seconds_ago: i64) -> String {
+pub(crate) fn relative_time(seconds_ago: i64) -> String {
     let plural = |n: i64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
     match seconds_ago {
         i64::MIN..=59 => "just now".to_string(),

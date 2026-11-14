@@ -40,6 +40,8 @@ const SCAN_DEPTH_OPTIONS: &[(u32, &str)] = &[
 pub enum GitSettingsPageAction {
     /// Toggle the visibility of the Git Graph panel.
     ToggleShowGitGraph,
+    /// Toggle the visibility of the Worktrees panel.
+    ToggleShowWorktrees,
     /// Toggle whether stashes are shown in the Git Graph.
     ToggleShowStashes,
     /// Toggle loading author pictures from Gravatar.
@@ -67,6 +69,14 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
                 )),
                 context,
                 flags::SHOW_GIT_GRAPH_CONTEXT_FLAG,
+            ),
+            ToggleSettingActionPair::new(
+                "worktrees panel",
+                builder(SettingsAction::Git(
+                    GitSettingsPageAction::ToggleShowWorktrees,
+                )),
+                context,
+                flags::SHOW_WORKTREES_CONTEXT_FLAG,
             ),
             ToggleSettingActionPair::new(
                 "stashes in git graph",
@@ -109,6 +119,7 @@ impl GitSettingsPageView {
         let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> = vec![
             Box::new(ShowGitGraphToggleWidget::default()),
             Box::new(ShowStashesToggleWidget::default()),
+            Box::new(ShowWorktreesToggleWidget::default()),
             Box::new(GravatarToggleWidget::default()),
             Box::new(ScanDepthWidget::default()),
         ];
@@ -174,6 +185,12 @@ impl TypedActionView for GitSettingsPageView {
             GitSettingsPageAction::ToggleShowStashes => {
                 GitSettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(settings.show_git_graph_stashes.toggle_and_save_value(ctx));
+                });
+                ctx.notify();
+            }
+            GitSettingsPageAction::ToggleShowWorktrees => {
+                GitSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings.show_worktrees.toggle_and_save_value(ctx));
                 });
                 ctx.notify();
             }
@@ -301,6 +318,49 @@ impl SettingsWidget for ShowStashesToggleWidget {
             Some(
                 "Shows each stash above the commit it was made on. Stashes made on branches \
                  hidden by the branch filter are not shown."
+                    .into(),
+            ),
+        )
+    }
+}
+
+/// The Worktrees panel visibility toggle.
+#[derive(Default)]
+struct ShowWorktreesToggleWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for ShowWorktreesToggleWidget {
+    type View = GitSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "worktrees worktree panel agents claude flowchart show hide"
+    }
+
+    fn render(
+        &self,
+        _view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        render_body_item::<GitSettingsPageAction>(
+            "Show Worktrees panel".into(),
+            None,
+            LocalOnlyIconState::Hidden,
+            ToggleState::Enabled,
+            appearance,
+            appearance
+                .ui_builder()
+                .switch(self.switch_state.clone())
+                .check(*GitSettings::as_ref(app).show_worktrees)
+                .build()
+                .on_click(move |ctx, _, _| {
+                    ctx.dispatch_typed_action(GitSettingsPageAction::ToggleShowWorktrees);
+                })
+                .finish(),
+            Some(
+                "A tools-panel tab showing the repository's worktrees under the branches they \
+                 were created from, with the Claude Code agents working in each."
                     .into(),
             ),
         )

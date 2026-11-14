@@ -66,6 +66,7 @@ use crate::workspace::view::git_graph::GitGraphView;
 use crate::workspace::view::global_search::view::{
     Event as GlobalSearchViewEvent, GlobalSearchEntryFocus, GlobalSearchView,
 };
+use crate::workspace::view::worktrees::{WorktreesEvent, WorktreesView};
 use crate::workspace::view::{
     LEFT_PANEL_AGENT_CONVERSATIONS_BINDING_NAME, LEFT_PANEL_GIT_GRAPH_BINDING_NAME,
     LEFT_PANEL_GLOBAL_SEARCH_BINDING_NAME, LEFT_PANEL_PROJECT_EXPLORER_BINDING_NAME,
@@ -82,6 +83,7 @@ struct MouseStateHandles {
     global_search_button: MouseStateHandle,
     warp_drive_button: MouseStateHandle,
     git_graph_button: MouseStateHandle,
+    worktrees_button: MouseStateHandle,
     sign_in_button: MouseStateHandle,
 }
 
@@ -92,6 +94,7 @@ pub enum LeftPanelAction {
     WarpDrive,
     ConversationListView,
     GitGraph,
+    Worktrees,
     SignIn,
 }
 
@@ -107,7 +110,8 @@ impl ToolPanelView {
         match self {
             ToolPanelView::ProjectExplorer
             | ToolPanelView::GlobalSearch { .. }
-            | ToolPanelView::GitGraph => ToolPanelAvailability::Available,
+            | ToolPanelView::GitGraph
+            | ToolPanelView::Worktrees => ToolPanelAvailability::Available,
             ToolPanelView::WarpDrive => {
                 if WarpDriveSettings::is_warp_drive_available(app) {
                     ToolPanelAvailability::Available
@@ -157,6 +161,8 @@ pub enum LeftPanelEvent {
         hunks: Vec<crate::code_review::diff_state::DiffHunk>,
         preview: crate::code::commit_diff_view::DiffPreview,
     },
+    /// The Worktrees panel asks to open a terminal tab in a worktree.
+    OpenDirectoryInNewTab(std::path::PathBuf),
     SignInRequested,
 }
 
@@ -167,6 +173,7 @@ pub enum ToolPanelView {
     WarpDrive,
     ConversationListView,
     GitGraph,
+    Worktrees,
 }
 
 /// Encapsulates the active view state to enforce that all mutations go through
@@ -206,6 +213,10 @@ mod active_view_state {
             left_panel.on_conversation_list_view_visibility_changed(true, ctx);
         }
 
+        if (previous == ToolPanelView::Worktrees) != (new_view == ToolPanelView::Worktrees) {
+            left_panel.update_worktrees_activity(ctx);
+        }
+
         left_panel.update_active_file_tree_subscription_state(ctx);
     }
 }
@@ -235,6 +246,7 @@ pub struct LeftPanelView {
     warp_drive_view: ViewHandle<DrivePanel>,
     conversation_list_view: ViewHandle<ConversationListView>,
     git_graph_view: ViewHandle<GitGraphView>,
+    worktrees_view: ViewHandle<WorktreesView>,
     active_view: active_view_state::ActiveViewState,
     toolbelt_buttons: Vec<ToolbeltButtonConfig>,
     active_pane_group: Option<WeakViewHandle<PaneGroup>>,
@@ -294,13 +306,15 @@ impl LeftPanelView {
                 ToolPanelView::ProjectExplorer
                 | ToolPanelView::GlobalSearch { .. }
                 | ToolPanelView::GitGraph
+                | ToolPanelView::Worktrees
                 | ToolPanelView::WarpDrive,
                 ToolPanelAvailability::RequiresAi,
             )
             | (
                 ToolPanelView::ProjectExplorer
                 | ToolPanelView::GlobalSearch { .. }
-                | ToolPanelView::GitGraph,
+                | ToolPanelView::GitGraph
+                | ToolPanelView::Worktrees,
                 ToolPanelAvailability::RequiresAccount,
             )
             | (_, ToolPanelAvailability::Available) => {
@@ -381,6 +395,12 @@ impl LeftPanelView {
         let warp_drive_view = ctx.add_typed_action_view(DrivePanel::new);
         let conversation_list_view = ctx.add_typed_action_view(ConversationListView::new);
         let git_graph_view = ctx.add_typed_action_view(GitGraphView::new);
+        let worktrees_view = ctx.add_typed_action_view(WorktreesView::new);
+        ctx.subscribe_to_view(&worktrees_view, |_me, _, event, ctx| match event {
+            WorktreesEvent::OpenDirectoryInNewTab(path) => {
+                ctx.emit(LeftPanelEvent::OpenDirectoryInNewTab(path.clone()));
+            }
+        });
 
         // Clicking a changed file in the Git Graph detail area is forwarded upward so the workspace opens a read-only diff pane in the main area.
         #[cfg(not(target_family = "wasm"))]
@@ -540,6 +560,9 @@ impl LeftPanelView {
                 else {
                     return;
                 };
+                me.worktrees_view.update(ctx, |view, ctx| {
+                    view.set_working_directory(Some(git_graph_dir.clone()), ctx);
+                });
                 let git_graph_view = me.git_graph_view.clone();
                 git_graph_view.update(ctx, |view, ctx| {
                     view.set_working_directory(Some(git_graph_dir), ctx);
@@ -554,6 +577,7 @@ impl LeftPanelView {
             warp_drive_view,
             conversation_list_view,
             git_graph_view,
+            worktrees_view,
             active_view: active_view_state::new(active_view),
             toolbelt_buttons,
             active_pane_group: None,
@@ -709,6 +733,15 @@ impl LeftPanelView {
                     tooltip_keybinding_names,
                 }
             }
+            ToolPanelView::Worktrees => ToolbeltButtonConfig {
+                icon: Icon::Dataflow,
+                active_icon: None,
+                tooltip_text: "Worktrees".to_string(),
+                action: LeftPanelAction::Worktrees,
+                render_with_active_state: false,
+                tooltip_keybinding: None,
+                tooltip_keybinding_names: Vec::new(),
+            },
         }
     }
 
@@ -722,6 +755,7 @@ impl LeftPanelView {
             LeftPanelAction::WarpDrive => handles.warp_drive_button.clone(),
             LeftPanelAction::ConversationListView => handles.conversation_list_view_button.clone(),
             LeftPanelAction::GitGraph => handles.git_graph_button.clone(),
+            LeftPanelAction::Worktrees => handles.worktrees_button.clone(),
             LeftPanelAction::SignIn => handles.sign_in_button.clone(),
         }
     }
@@ -907,6 +941,9 @@ impl LeftPanelView {
         // previous group's state. Within the group, the `FocusedRepoChanged`
         // handler then tracks whichever split pane is focused.
         let git_graph_dir = local_paths.first().cloned();
+        self.worktrees_view.update(ctx, |view, ctx| {
+            view.set_working_directory(git_graph_dir.clone(), ctx);
+        });
         let git_graph_view = self.git_graph_view.clone();
         git_graph_view.update(ctx, |view, ctx| {
             view.set_working_directory(git_graph_dir, ctx);
@@ -998,6 +1035,7 @@ impl LeftPanelView {
                 });
             }
             ToolPanelView::GitGraph => ctx.focus(&self.git_graph_view),
+            ToolPanelView::Worktrees => ctx.focus(&self.worktrees_view),
         }
     }
 
@@ -1165,6 +1203,7 @@ impl LeftPanelView {
                     self.active_view.get() == ToolPanelView::ConversationListView
                 }
                 LeftPanelAction::GitGraph => self.active_view.get() == ToolPanelView::GitGraph,
+                LeftPanelAction::Worktrees => self.active_view.get() == ToolPanelView::Worktrees,
                 LeftPanelAction::SignIn => false,
             };
         }
@@ -1317,13 +1356,33 @@ impl LeftPanelView {
             LeftPanelAction::GitGraph => {
                 active_view_state::set(self, ToolPanelView::GitGraph, ctx);
             }
+            LeftPanelAction::Worktrees => {
+                active_view_state::set(self, ToolPanelView::Worktrees, ctx);
+            }
         }
+    }
+
+    /// Lets the Worktrees panel poll only while it's the visible tab of an open panel.
+    fn update_worktrees_activity(&self, ctx: &mut ViewContext<Self>) {
+        let panel_open = self
+            .active_pane_group
+            .as_ref()
+            .and_then(|group| group.upgrade(ctx))
+            .is_some_and(|group| group.as_ref(ctx).left_panel_open);
+        self.set_worktrees_active(panel_open, ctx);
+    }
+
+    fn set_worktrees_active(&self, panel_open: bool, ctx: &mut ViewContext<Self>) {
+        let active = panel_open && self.active_view.get() == ToolPanelView::Worktrees;
+        self.worktrees_view
+            .update(ctx, |view, ctx| view.set_active(active, ctx));
     }
 
     pub fn on_left_panel_visibility_changed(&self, is_now_open: bool, ctx: &mut ViewContext<Self>) {
         if ToolPanelView::ConversationListView == self.active_view.get() {
             self.on_conversation_list_view_visibility_changed(is_now_open, ctx);
         }
+        self.set_worktrees_active(is_now_open, ctx);
 
         self.update_active_file_tree_subscription_state(ctx);
     }
@@ -1423,6 +1482,7 @@ impl View for LeftPanelView {
                 ToolPanelView::WarpDrive => ctx.focus(&self.warp_drive_view),
                 ToolPanelView::ConversationListView => ctx.focus(&self.conversation_list_view),
                 ToolPanelView::GitGraph => ctx.focus(&self.git_graph_view),
+                ToolPanelView::Worktrees => ctx.focus(&self.worktrees_view),
             }
         }
     }
@@ -1499,6 +1559,9 @@ impl View for LeftPanelView {
                         .finish(),
                 )
                 .finish(),
+                ToolPanelView::Worktrees => {
+                    Shrinkable::new(1.0, ChildView::new(&self.worktrees_view).finish()).finish()
+                }
             }
         };
 

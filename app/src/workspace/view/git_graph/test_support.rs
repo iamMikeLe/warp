@@ -5,7 +5,7 @@ use warpui::elements::Element;
 use crate::appearance::Appearance;
 
 /// Renders `build` in a real window and lays it out, so a layout panic fails the test.
-pub(super) fn lay_out(build: fn(&Appearance) -> Box<dyn Element>) {
+pub(crate) fn lay_out(build: fn(&Appearance) -> Box<dyn Element>) {
     use warpui::platform::WindowStyle;
     use warpui::{App, AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext};
 
