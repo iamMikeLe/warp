@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#
+# Builds a release WarpOss.app for this Mac (OSS channel: Git Graph, Worktrees and the other fork
+# features), signs it with this Mac's own certificate, and wraps it in a drag-to-Applications DMG.
+# For personal use: the app isn't notarized, so on another Mac it needs right-click > Open once.
+#
+# Usage: script/macos/personal_dmg [output.dmg]   (default: ~/Desktop/WarpOss.dmg)
+
+set -euo pipefail
+
+cd "$(dirname "$0")/../.."
+DMG_PATH="${1:-$HOME/Desktop/WarpOss.dmg}"
+
+case "$(uname -m)" in
+  arm64) TARGET="aarch64-apple-darwin" ;;
+  x86_64) TARGET="x86_64-apple-darwin" ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+APP="target/$TARGET/release/bundle/osx/WarpOss.app"
+
+STAMP="$(mktemp)"
+STAGE=""
+trap 'rm -f "$STAMP"; [[ -n "$STAGE" ]] && rm -rf "$STAGE"' EXIT
+
+# Warp's bundle script ends by copying a DMG that only its own (Warp-certificate) signing path
+# creates, so it exits with an error after a successful self-signed build. Judge success by
+# whether the app was rebuilt instead.
+WARP_SKIP_COMMON_SKILLS_INSTALL=1 ./script/bundle --channel oss --selfsign --nouniversal || true
+
+if [[ ! "$APP/Contents/MacOS/warp-oss" -nt "$STAMP" ]]; then
+  echo "The build failed: $APP wasn't rebuilt. See the output above." >&2
+  exit 1
+fi
+
+STAGE="$(mktemp -d)"
+cp -R "$APP" "$STAGE/"
+ln -s /Applications "$STAGE/Applications"
+hdiutil create -volname WarpOss -srcfolder "$STAGE" -ov -format UDZO "$DMG_PATH"
+
+echo
+echo "Created $DMG_PATH"
+echo "Open it and drag WarpOss into Applications (quit a running WarpOss first)."

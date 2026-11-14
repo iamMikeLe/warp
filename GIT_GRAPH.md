@@ -116,6 +116,16 @@ This opens **WarpOss**, which keeps its own settings in `~/.warp-oss` and doesn'
 installed Warp. Its log is `~/Library/Logs/warp-oss.log`. Open the Git Graph from the **Tools panel**, using the tool icon at the top
 left (or the left panel button when vertical tabs are off), then the branch icon.
 
+## Installing it as an app (DMG, `daily` only)
+
+```sh
+script/macos/personal_dmg            # writes ~/Desktop/WarpOss.dmg
+```
+
+Builds a release WarpOss for this Mac, signs it with the Mac's own certificate, and packages it
+as a drag-to-Applications DMG. It isn't notarized: on another Mac, right-click the app and choose
+**Open** the first time. Rebuild and reinstall to update.
+
 ## Staying up to date with upstream
 
 Merge `upstream/master` into the branches based on upstream, then pass the result down the
