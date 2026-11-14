@@ -502,6 +502,12 @@ pub enum AppearancePageAction {
     ToggleToolsPanelGlobalSearch,
     ToggleToolsPanelWarpDrive,
     ToggleToolsPanelConversationHistory,
+    /// Move a tools panel button one place up or down (by `ToolPanelView::stable_id`).
+    MoveToolsPanelItem {
+        id: &'static str,
+        up: bool,
+    },
+    ResetToolsPanelOrder,
     SetEnforceMinimumContrast(EnforceMinimumContrast),
     OpenUrl(String),
     ToggleFocusPaneOnHover,
@@ -646,6 +652,14 @@ impl TypedActionView for AppearanceSettingsPageView {
                 WarpDriveSettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(settings.enable_warp_drive.toggle_and_save_value(ctx));
                 });
+                ctx.notify();
+            }
+            MoveToolsPanelItem { id, up } => {
+                super::tools_panel_widget::move_item(id, *up, ctx);
+                ctx.notify();
+            }
+            ResetToolsPanelOrder => {
+                super::tools_panel_widget::reset_order(ctx);
                 ctx.notify();
             }
             ToggleToolsPanelConversationHistory => {
@@ -1419,17 +1433,9 @@ impl AppearanceSettingsPageView {
         // Each toggle is gated only on compile-time / feature-flag availability
         // of the corresponding tab (not on transient login/AI state), so the
         // section stays stable regardless of when the page is built.
-        let mut tools_panel_widgets: Vec<Box<dyn SettingsWidget<View = Self>>> = vec![];
-        if cfg!(feature = "local_fs") {
-            tools_panel_widgets.push(Box::new(ToolsPanelProjectExplorerWidget::default()));
-        }
-        if FeatureFlag::AgentViewConversationListView.is_enabled() {
-            tools_panel_widgets.push(Box::new(ToolsPanelConversationHistoryWidget::default()));
-        }
-        if cfg!(feature = "local_fs") && FeatureFlag::GlobalSearch.is_enabled() {
-            tools_panel_widgets.push(Box::new(ToolsPanelGlobalSearchWidget::default()));
-        }
-        tools_panel_widgets.push(Box::new(ToolsPanelWarpDriveWidget::default()));
+        let tools_panel_widgets: Vec<Box<dyn SettingsWidget<View = Self>>> = vec![Box::new(
+            super::tools_panel_widget::ToolsPanelListWidget::default(),
+        )];
         if !tools_panel_widgets.is_empty() {
             categories.push(Category::new("Tools panel", tools_panel_widgets));
         }
@@ -3567,163 +3573,6 @@ impl SettingsWidget for ToolsPanelStateScopeWidget {
 /// chip and points at the same backing setting so Settings and onboarding stay
 /// in sync; toggling live-updates the tools panel via `Workspace`'s settings
 /// subscriptions.
-#[derive(Default)]
-struct ToolsPanelProjectExplorerWidget {
-    switch_state: SwitchStateHandle,
-}
-
-impl SettingsWidget for ToolsPanelProjectExplorerWidget {
-    type View = AppearanceSettingsPageView;
-
-    fn search_terms(&self) -> &str {
-        "tools panel tabs file explorer project explorer file tree left panel visibility"
-    }
-
-    fn render(
-        &self,
-        _view: &Self::View,
-        appearance: &Appearance,
-        app: &AppContext,
-    ) -> Box<dyn Element> {
-        render_body_item::<AppearancePageAction>(
-            "Project explorer".to_string(),
-            None,
-            LocalOnlyIconState::Hidden,
-            ToggleState::Enabled,
-            appearance,
-            appearance
-                .ui_builder()
-                .switch(self.switch_state.clone())
-                .check(*CodeSettings::as_ref(app).show_project_explorer)
-                .build()
-                .on_click(|evt_ctx, _app, _v2f| {
-                    evt_ctx.dispatch_typed_action(
-                        AppearancePageAction::ToggleToolsPanelProjectExplorer,
-                    );
-                })
-                .finish(),
-            Some("Show the project explorer / file tree tab in the tools panel.".to_string()),
-        )
-    }
-}
-
-#[derive(Default)]
-struct ToolsPanelConversationHistoryWidget {
-    switch_state: SwitchStateHandle,
-}
-
-impl SettingsWidget for ToolsPanelConversationHistoryWidget {
-    type View = AppearanceSettingsPageView;
-
-    fn search_terms(&self) -> &str {
-        "tools panel tabs conversation history agent conversations left panel visibility"
-    }
-
-    fn render(
-        &self,
-        _view: &Self::View,
-        appearance: &Appearance,
-        app: &AppContext,
-    ) -> Box<dyn Element> {
-        render_body_item::<AppearancePageAction>(
-            "Agent conversations".to_string(),
-            None,
-            LocalOnlyIconState::Hidden,
-            ToggleState::Enabled,
-            appearance,
-            appearance
-                .ui_builder()
-                .switch(self.switch_state.clone())
-                .check(*AISettings::as_ref(app).show_conversation_history)
-                .build()
-                .on_click(|evt_ctx, _app, _v2f| {
-                    evt_ctx.dispatch_typed_action(
-                        AppearancePageAction::ToggleToolsPanelConversationHistory,
-                    );
-                })
-                .finish(),
-            Some("Show the agent conversation history tab in the tools panel.".to_string()),
-        )
-    }
-}
-
-#[derive(Default)]
-struct ToolsPanelGlobalSearchWidget {
-    switch_state: SwitchStateHandle,
-}
-
-impl SettingsWidget for ToolsPanelGlobalSearchWidget {
-    type View = AppearanceSettingsPageView;
-
-    fn search_terms(&self) -> &str {
-        "tools panel tabs global file search left panel visibility"
-    }
-
-    fn render(
-        &self,
-        _view: &Self::View,
-        appearance: &Appearance,
-        app: &AppContext,
-    ) -> Box<dyn Element> {
-        render_body_item::<AppearancePageAction>(
-            "Global search".to_string(),
-            None,
-            LocalOnlyIconState::Hidden,
-            ToggleState::Enabled,
-            appearance,
-            appearance
-                .ui_builder()
-                .switch(self.switch_state.clone())
-                .check(*CodeSettings::as_ref(app).show_global_search)
-                .build()
-                .on_click(|evt_ctx, _app, _v2f| {
-                    evt_ctx
-                        .dispatch_typed_action(AppearancePageAction::ToggleToolsPanelGlobalSearch);
-                })
-                .finish(),
-            Some("Show the global file search tab in the tools panel.".to_string()),
-        )
-    }
-}
-
-#[derive(Default)]
-struct ToolsPanelWarpDriveWidget {
-    switch_state: SwitchStateHandle,
-}
-
-impl SettingsWidget for ToolsPanelWarpDriveWidget {
-    type View = AppearanceSettingsPageView;
-
-    fn search_terms(&self) -> &str {
-        "tools panel tabs warp drive left panel visibility"
-    }
-
-    fn render(
-        &self,
-        _view: &Self::View,
-        appearance: &Appearance,
-        app: &AppContext,
-    ) -> Box<dyn Element> {
-        render_body_item::<AppearancePageAction>(
-            "Warp Drive".to_string(),
-            None,
-            LocalOnlyIconState::Hidden,
-            ToggleState::Enabled,
-            appearance,
-            appearance
-                .ui_builder()
-                .switch(self.switch_state.clone())
-                .check(*WarpDriveSettings::as_ref(app).enable_warp_drive)
-                .build()
-                .on_click(|evt_ctx, _app, _v2f| {
-                    evt_ctx.dispatch_typed_action(AppearancePageAction::ToggleToolsPanelWarpDrive);
-                })
-                .finish(),
-            Some("Show the Warp Drive tab in the tools panel.".to_string()),
-        )
-    }
-}
-
 struct InputTypeWidget {
     radio_buttons_states: Vec<MouseStateHandle>,
 }

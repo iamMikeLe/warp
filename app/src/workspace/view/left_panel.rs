@@ -153,6 +153,29 @@ pub enum ToolPanelView {
     ConversationListView,
 }
 
+impl ToolPanelView {
+    /// The id under which this panel's position is saved in the tools panel order setting.
+    pub fn stable_id(&self) -> &'static str {
+        match self {
+            ToolPanelView::ProjectExplorer => "project_explorer",
+            ToolPanelView::GlobalSearch { .. } => "global_search",
+            ToolPanelView::WarpDrive => "warp_drive",
+            ToolPanelView::ConversationListView => "conversations",
+        }
+    }
+}
+
+/// Orders `items` by where their ids appear in `saved`; items not listed keep their relative
+/// order after the listed ones.
+pub fn sort_by_saved_order<T>(items: &mut [T], id: impl Fn(&T) -> &str, saved: &[String]) {
+    items.sort_by_key(|item| {
+        saved
+            .iter()
+            .position(|saved_id| saved_id == id(item))
+            .unwrap_or(usize::MAX)
+    });
+}
+
 /// Encapsulates the active view state to enforce that all mutations go through
 /// `active_view_state::set`, which handles necessary side effects.
 mod active_view_state {
@@ -1438,3 +1461,7 @@ fn deduplicate_by_directory_name(directories: Vec<PathBuf>) -> Vec<PathBuf> {
         .filter(|path| seen_paths.insert(path.clone()))
         .collect()
 }
+
+#[cfg(test)]
+#[path = "left_panel_tests.rs"]
+mod tests;

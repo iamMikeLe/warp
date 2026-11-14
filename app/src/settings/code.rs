@@ -65,6 +65,19 @@ define_settings_group!(CodeSettings, settings: [
         toml_path: "code.editor.show_global_search",
         description: "Whether global file search is shown in the tools panel.",
     },
+    // The order of the tools panel's buttons, as stable panel ids (see
+    // `ToolPanelView::stable_id`). Empty = the default order; panels missing from the list follow
+    // the listed ones in their default order.
+    tools_panel_order: ToolsPanelOrder {
+        type: Vec<String>,
+        default: vec![],
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
+        private: false,
+        toml_path: "appearance.tools_panel.order",
+        description: "The order of the tools panel's buttons, as panel ids (project_explorer, conversations, global_search, warp_drive, ...).",
+    },
     // Controls whether hidden files (dotfiles) are shown in the project explorer.
     show_hidden_files: ShowHiddenFiles {
         type: bool,
