@@ -5,8 +5,16 @@
 # For personal use: the app isn't notarized, so on another Mac it needs right-click > Open once.
 #
 # Usage: script/macos/personal_dmg [output.dmg]   (default: ~/Desktop/WarpOss.dmg)
+#
+# One-time setup beyond the normal build tools: cargo install --locked cargo-about@0.8.4
 
 set -euo pipefail
+
+if ! command -v cargo-about > /dev/null; then
+  echo "Missing cargo-about (used for the bundled license file):" >&2
+  echo "  cargo install --locked cargo-about@0.8.4" >&2
+  exit 1
+fi
 
 cd "$(dirname "$0")/../.."
 DMG_PATH="${1:-$HOME/Desktop/WarpOss.dmg}"
@@ -16,7 +24,7 @@ case "$(uname -m)" in
   x86_64) TARGET="x86_64-apple-darwin" ;;
   *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
-APP="target/$TARGET/release/bundle/osx/WarpOss.app"
+APP="target/$TARGET/release-lto/bundle/osx/WarpOss.app"
 
 STAMP="$(mktemp)"
 STAGE=""
