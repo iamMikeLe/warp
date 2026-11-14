@@ -200,6 +200,7 @@ pub const TEST_STYLES: RichTextStyles = RichTextStyles {
     minimum_paragraph_height: Some(PARAGRAPH_MIN_HEIGHT),
     cursor_width: 1.,
     highlight_urls: true,
+    rainbow_indent: None,
     table_style: TableStyle {
         border_color: WHITE,
         header_background: WHITE,

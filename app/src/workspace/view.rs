@@ -26846,6 +26846,9 @@ impl View for Workspace {
         if *CodeSettings::as_ref(app).show_hidden_files {
             context.set.insert(flags::SHOW_HIDDEN_FILES);
         }
+        if *CodeSettings::as_ref(app).rainbow_indent {
+            context.set.insert(flags::RAINBOW_INDENT_CONTEXT_FLAG);
+        }
 
         if self.team_uid(app).is_some() {
             context.set.insert("WarpDrive_BelongsToTeam");

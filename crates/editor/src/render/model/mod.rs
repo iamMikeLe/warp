@@ -1185,6 +1185,46 @@ pub struct RichTextStyles {
     pub highlight_urls: bool,
     /// Styling for tables.
     pub table_style: TableStyle,
+    /// Faint per-level bands behind each line's leading indentation (code editors only).
+    pub rainbow_indent: Option<RainbowIndent>,
+}
+
+/// Colors and spacing for [`RichTextStyles::rainbow_indent`]: indent level `n` of a line is drawn
+/// in `colors[n % colors.len()]`.
+#[derive(Clone, PartialEq, Debug)]
+pub struct RainbowIndent {
+    pub colors: Vec<ColorU>,
+    /// Columns per indent level (the file's indent unit).
+    pub unit_columns: usize,
+}
+
+/// A paragraph's leading whitespace, for [`RainbowIndent`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LeadingIndent {
+    /// Leading space and tab characters.
+    chars: usize,
+    /// The same whitespace measured in columns, with tabs expanded.
+    columns: usize,
+}
+
+impl LeadingIndent {
+    pub fn measure(text: &str, tab_columns: usize) -> Self {
+        let tab_columns = tab_columns.max(1);
+        let mut indent = Self::default();
+        for c in text.chars() {
+            match c {
+                ' ' => indent.columns += 1,
+                '\t' => indent.columns += tab_columns - indent.columns % tab_columns,
+                _ => break,
+            }
+            indent.chars += 1;
+        }
+        // A whitespace-only line has no code to show the levels of.
+        if indent.chars == text.trim_end_matches(['\n', '\r']).chars().count() {
+            return Self::default();
+        }
+        indent
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -1728,6 +1768,7 @@ pub struct Paragraph {
     detected_url: Vec<ParsedUrl>,
     spacing: BlockSpacing,
     minimum_height: Option<Pixels>,
+    leading_indent: LeadingIndent,
 }
 
 impl Paragraph {
@@ -1755,7 +1796,13 @@ impl Paragraph {
             detected_url: active_url,
             spacing,
             minimum_height,
+            leading_indent: LeadingIndent::default(),
         }
+    }
+
+    /// Records the paragraph's leading whitespace, from its `text`, for [`RainbowIndent`].
+    pub fn set_leading_indent(&mut self, text: &str, tab_columns: Option<u8>) {
+        self.leading_indent = LeadingIndent::measure(text, tab_columns.map_or(4, usize::from));
     }
 
     pub fn first_line_height(&self) -> f32 {
@@ -5096,6 +5143,38 @@ impl<'a> Positioned<'a, Paragraph> {
             cursor_data,
             styles,
         );
+    }
+
+    /// Draws [`RainbowIndent`] bands behind the leading indentation of the paragraph's first
+    /// line (wrapped continuation lines have no indentation of their own).
+    pub(crate) fn draw_rainbow_indent(&self, rainbow: &RainbowIndent, ctx: &mut RenderContext) {
+        let indent = self.item.leading_indent;
+        if indent.columns == 0 || rainbow.colors.is_empty() {
+            return;
+        }
+        let Some(line) = self.lines().next() else {
+            return;
+        };
+        // Monospace: the indent's width divided evenly by its columns.
+        let indent_width = line.item.x_for_index(indent.chars);
+        let column_width = indent_width / indent.columns as f32;
+        let unit = rainbow.unit_columns.max(1);
+        let origin = ctx.content_to_screen(line.content_origin());
+        let height = line_height(line.item);
+        if origin.y() > ctx.bounds.max_y() || origin.y() + height < ctx.bounds.min_y() {
+            return;
+        }
+        for (level, start) in (0..indent.columns).step_by(unit).enumerate() {
+            let end = (start + unit).min(indent.columns);
+            let color = rainbow.colors[level % rainbow.colors.len()];
+            ctx.paint
+                .scene
+                .draw_rect_with_hit_recording(RectF::new(
+                    origin + vec2f(start as f32 * column_width, 0.),
+                    vec2f((end - start) as f32 * column_width, height),
+                ))
+                .with_background(Fill::Solid(color));
+        }
     }
 
     /// Draws a background highlight over the portion of this block that overlaps with the given

@@ -533,6 +533,7 @@ impl CodeEditorModel {
             show_placeholder_text_on_empty_block: false,
             cursor_width: 0.,
             highlight_urls: false,
+            rainbow_indent: None,
             table_style: TableStyle {
                 border_color: TRANSPARENT,
                 header_background: TRANSPARENT,
