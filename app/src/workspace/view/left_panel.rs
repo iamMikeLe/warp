@@ -84,17 +84,22 @@ struct MouseStateHandles {
     warp_drive_button: MouseStateHandle,
     git_graph_button: MouseStateHandle,
     worktrees_button: MouseStateHandle,
+    open_terminal_button: MouseStateHandle,
     sign_in_button: MouseStateHandle,
 }
 
 #[derive(Clone, Debug)]
 pub enum LeftPanelAction {
     ProjectExplorer,
-    GlobalSearch { entry_focus: GlobalSearchEntryFocus },
+    GlobalSearch {
+        entry_focus: GlobalSearchEntryFocus,
+    },
     WarpDrive,
     ConversationListView,
     GitGraph,
     Worktrees,
+    /// Open a new terminal at the right edge of the current tab (e.g. after closing the last one).
+    OpenTerminal,
     SignIn,
 }
 
@@ -164,6 +169,8 @@ pub enum LeftPanelEvent {
     /// The Worktrees panel asks to open a terminal tab in a worktree.
     OpenDirectoryInNewTab(std::path::PathBuf),
     SignInRequested,
+    /// Open a new terminal at the right edge of the current tab.
+    OpenTerminalInTab,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -756,6 +763,7 @@ impl LeftPanelView {
             LeftPanelAction::ConversationListView => handles.conversation_list_view_button.clone(),
             LeftPanelAction::GitGraph => handles.git_graph_button.clone(),
             LeftPanelAction::Worktrees => handles.worktrees_button.clone(),
+            LeftPanelAction::OpenTerminal => handles.open_terminal_button.clone(),
             LeftPanelAction::SignIn => handles.sign_in_button.clone(),
         }
     }
@@ -1204,7 +1212,7 @@ impl LeftPanelView {
                 }
                 LeftPanelAction::GitGraph => self.active_view.get() == ToolPanelView::GitGraph,
                 LeftPanelAction::Worktrees => self.active_view.get() == ToolPanelView::Worktrees,
-                LeftPanelAction::SignIn => false,
+                LeftPanelAction::OpenTerminal | LeftPanelAction::SignIn => false,
             };
         }
     }
@@ -1359,6 +1367,7 @@ impl LeftPanelView {
             LeftPanelAction::Worktrees => {
                 active_view_state::set(self, ToolPanelView::Worktrees, ctx);
             }
+            LeftPanelAction::OpenTerminal => ctx.emit(LeftPanelEvent::OpenTerminalInTab),
         }
     }
 
@@ -1490,23 +1499,41 @@ impl View for LeftPanelView {
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
         let appearance = Appearance::as_ref(app);
 
-        // If there is only one button in the toolbelt row,
-        // there is no need to show it as it's a bit redundant.
-        let toolbelt_button_row = if self.toolbelt_buttons.len() > 1 {
-            Some(
-                Flex::row()
-                    .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                    .with_spacing(4.0)
-                    .with_children(self.toolbelt_buttons.iter().map(|button_config| {
-                        let mouse_state = self.toolbelt_mouse_state(&button_config.action);
-                        Self::render_button(button_config, mouse_state, appearance)
-                    }))
-                    .with_main_axis_size(MainAxisSize::Min)
-                    .finish(),
-            )
-        } else {
-            None
-        };
+        // A single view button is redundant, so it's only shown alongside others; the
+        // open-terminal button is always there, so a tab whose terminal was closed can get one back.
+        let show_view_buttons = self.toolbelt_buttons.len() > 1;
+        let open_terminal_button = Container::new(Self::render_button(
+            &ToolbeltButtonConfig {
+                icon: Icon::Terminal,
+                active_icon: None,
+                tooltip_text: "Open a terminal in this tab".to_string(),
+                action: LeftPanelAction::OpenTerminal,
+                render_with_active_state: false,
+                tooltip_keybinding: None,
+                tooltip_keybinding_names: Vec::new(),
+            },
+            self.toolbelt_mouse_state(&LeftPanelAction::OpenTerminal),
+            appearance,
+        ))
+        .with_margin_left(if show_view_buttons { 8. } else { 0. })
+        .finish();
+        let toolbelt_button_row = Some(
+            Flex::row()
+                .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                .with_spacing(4.0)
+                .with_children(
+                    self.toolbelt_buttons
+                        .iter()
+                        .filter(|_| show_view_buttons)
+                        .map(|button_config| {
+                            let mouse_state = self.toolbelt_mouse_state(&button_config.action);
+                            Self::render_button(button_config, mouse_state, appearance)
+                        }),
+                )
+                .with_child(open_terminal_button)
+                .with_main_axis_size(MainAxisSize::Min)
+                .finish(),
+        );
 
         let active_view = self.active_view.get();
         let availability = self.active_view_availability(app);
