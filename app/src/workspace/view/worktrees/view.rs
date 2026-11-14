@@ -13,6 +13,9 @@ use pathfinder_color::ColorU;
 use warp_core::ui::Icon;
 use warp_core::ui::theme::color::internal_colors;
 use warpui::clipboard::ClipboardContent;
+use warpui::elements::shimmering_text::{
+    ShimmerConfig, ShimmeringTextElement, ShimmeringTextStateHandle,
+};
 use warpui::elements::{
     Align, ChildAnchor, ChildView, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox,
     Container, CornerRadius, CrossAxisAlignment, Dismiss, Element, Empty, Expanded, Fill, Flex,
@@ -22,7 +25,7 @@ use warpui::elements::{
 };
 use warpui::fonts::{Properties, Weight};
 use warpui::geometry::vector::{Vector2F, vec2f};
-use warpui::text_layout::ClipConfig;
+use warpui::text_layout::{ClipConfig, ClipDirection, ClipStyle};
 use warpui::ui_components::components::UiComponent;
 use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
 
@@ -37,7 +40,7 @@ use crate::workspace::view::git_graph::view::relative_time;
 const AGENT_POLL: Duration = Duration::from_secs(3);
 /// Every this many agent polls, the git state reloads too (~30 s).
 const GIT_POLL_EVERY: u32 = 10;
-const CARD_HEIGHT: f32 = 86.0;
+const CARD_HEIGHT: f32 = 104.0;
 const CARD_GAP: f32 = 8.0;
 const BRANCH_ROW_HEIGHT: f32 = 30.0;
 /// The node sits level with the card's title line.
@@ -96,6 +99,10 @@ pub(crate) struct WorktreesView {
     scroll_state: ClippedScrollStateHandle,
     /// Guards against overlapping git loads.
     loading: bool,
+    /// Shows "Refreshing…" in the header while a refresh the user asked for runs (background
+    /// polls stay silent).
+    show_refreshing: bool,
+    loading_shimmer: ShimmeringTextStateHandle,
     /// Whether the panel is the visible tools-panel tab (polling runs only then).
     active: bool,
     /// Bumped whenever polling restarts, so an older poll loop stops.
@@ -134,6 +141,8 @@ impl WorktreesView {
             confirm_mouse_states: Default::default(),
             scroll_state: ClippedScrollStateHandle::new(),
             loading: false,
+            show_refreshing: false,
+            loading_shimmer: ShimmeringTextStateHandle::new(),
             active: false,
             poll_generation: 0,
             polls: 0,
@@ -181,6 +190,12 @@ impl WorktreesView {
             ctx.notify();
             return;
         };
+        // Finding the repository and listing worktrees both take a moment; show the loading
+        // state right away instead of a stale or empty panel.
+        if !matches!(self.state, LoadState::Loaded) {
+            self.state = LoadState::Loading;
+            ctx.notify();
+        }
         #[cfg(not(target_family = "wasm"))]
         ctx.spawn(
             async move { super::data::main_worktree_for(&anchor).await },
@@ -244,8 +259,11 @@ impl WorktreesView {
             |view, (repo, result), ctx| {
                 view.loading = false;
                 if view.repo.as_deref() != Some(repo.as_path()) {
+                    // The repository changed mid-load and its own load was skipped; start it.
+                    view.reload(ctx);
                     return;
                 }
+                view.show_refreshing = false;
                 match result {
                     Ok(worktrees) => view.set_worktrees(worktrees),
                     Err(err) => view.state = LoadState::Failed(format!("{err:#}")),
@@ -435,6 +453,15 @@ impl WorktreesView {
                         .finish(),
                 )
                 .with_child(Expanded::new(1.0, Empty::new().finish()).finish())
+                .with_children(self.show_refreshing.then(|| {
+                    Container::new(shimmer_text(
+                        "Refreshing…",
+                        self.loading_shimmer.clone(),
+                        appearance,
+                    ))
+                    .with_margin_right(6.)
+                    .finish()
+                }))
                 .with_child(refresh)
                 .finish(),
         )
@@ -662,6 +689,7 @@ fn render_card(
 
     let content = Flex::column()
         .with_child(title.finish())
+        .with_child(path_line(&entry.path, appearance))
         .with_child(line_text(git_parts.join("  ·  "), appearance, false))
         .with_child(line_text(last_commit, appearance, true))
         .with_child(agents_line(worktree, appearance))
@@ -716,6 +744,49 @@ fn render_card(
             y: offset.y(),
         });
     })
+    .finish()
+}
+
+fn shimmer_text(
+    text: &'static str,
+    state: ShimmeringTextStateHandle,
+    appearance: &Appearance,
+) -> Box<dyn Element> {
+    let theme = appearance.theme();
+    ShimmeringTextElement::new(
+        text,
+        appearance.ui_font_family(),
+        appearance.ui_font_size(),
+        theme.sub_text_color(theme.background()).into_solid(),
+        theme.foreground().into_solid(),
+        ShimmerConfig::default(),
+        state,
+    )
+    .finish()
+}
+
+/// The worktree's folder for display: `~` for the home directory, clipped from the start so the
+/// folder name stays visible.
+fn path_line(path: &Path, appearance: &Appearance) -> Box<dyn Element> {
+    let display = match dirs::home_dir().and_then(|home| path.strip_prefix(home).ok()) {
+        Some(relative) => format!("~/{}", relative.display()),
+        None => path.display().to_string(),
+    };
+    let theme = appearance.theme();
+    Container::new(
+        Text::new_inline(
+            display,
+            appearance.ui_font_family(),
+            appearance.ui_font_size() - 2.,
+        )
+        .with_color(theme.sub_text_color(theme.background()).into())
+        .with_clip(ClipConfig {
+            direction: ClipDirection::Start,
+            style: ClipStyle::Ellipsis,
+        })
+        .finish(),
+    )
+    .with_margin_top(2.)
     .finish()
 }
 
@@ -941,7 +1012,14 @@ impl View for WorktreesView {
                 "Open a terminal in a git repository to see its worktrees.",
                 appearance,
             ),
-            LoadState::Loading => message("Loading worktrees…", appearance),
+            LoadState::Loading => Container::new(shimmer_text(
+                "Loading worktrees…",
+                self.loading_shimmer.clone(),
+                appearance,
+            ))
+            .with_horizontal_padding(12.)
+            .with_vertical_padding(8.)
+            .finish(),
             LoadState::Failed(err) => {
                 message(&format!("Couldn't list worktrees: {err}"), appearance)
             }
@@ -1013,6 +1091,7 @@ impl TypedActionView for WorktreesView {
         match action {
             WorktreesAction::Refresh => {
                 self.error = None;
+                self.show_refreshing = matches!(self.state, LoadState::Loaded);
                 self.resolve_repo(ctx);
             }
             WorktreesAction::OpenInNewTab(path) => {

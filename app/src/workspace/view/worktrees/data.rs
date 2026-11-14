@@ -12,7 +12,6 @@
 //! its working directory (so an agent in `.claude/worktrees/x` isn't also counted for the main
 //! worktree that contains that folder).
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -335,7 +334,9 @@ pub(crate) async fn main_worktree_for(dir: &Path) -> Option<PathBuf> {
         .map(|entry| entry.path)
 }
 
-/// Loads every worktree of the repository at `repo` with its base, status, and agents.
+/// Loads every worktree of the repository at `repo` with its base, status, and agents. Each
+/// worktree's git calls run concurrently, so the panel's load time doesn't grow with the number
+/// of worktrees.
 #[cfg(not(target_family = "wasm"))]
 pub(crate) async fn load_worktrees(repo: &Path) -> anyhow::Result<Vec<WorktreeInfo>> {
     let entries = parse_worktree_list(&git(repo, &["worktree", "list", "--porcelain"]).await?);
@@ -360,110 +361,126 @@ pub(crate) async fn load_worktrees(repo: &Path) -> anyhow::Result<Vec<WorktreeIn
     }
 
     let paths: Vec<PathBuf> = entries.iter().map(|e| e.path.clone()).collect();
-    let mut agents = assign_agents(&paths, load_agent_sessions()).into_iter();
+    let agents = assign_agents(&paths, load_agent_sessions());
+    let loads = entries
+        .into_iter()
+        .zip(agents)
+        .map(|(entry, agents)| load_worktree(repo, entry, agents, &candidates, &known_branches));
+    Ok(futures::future::join_all(loads).await)
+}
 
-    let mut infos = Vec::with_capacity(entries.len());
-    let mut contains_cache: HashMap<(String, String), bool> = HashMap::new();
-    for entry in entries {
-        let agents = agents.next().unwrap_or_default();
-        let mut info = WorktreeInfo {
-            base: None,
-            changed_files: 0,
-            ahead: 0,
-            behind: 0,
-            last_subject: String::new(),
-            last_time: 0,
-            agents,
-            entry,
-        };
-        if info.entry.prunable {
-            infos.push(info);
-            continue;
-        }
-        let path = info.entry.path.clone();
-        info.changed_files = git(&path, &["status", "--porcelain"])
-            .await
-            .map(|out| out.lines().filter(|l| !l.trim().is_empty()).count())
-            .unwrap_or(0);
-        if let Ok(out) = git(&path, &["log", "-1", "--format=%ct%x1f%s", "HEAD"]).await
-            && let Some((time, subject)) = out.trim_end().split_once('\u{1f}')
-        {
-            info.last_time = time.parse().unwrap_or(0);
-            info.last_subject = subject.to_string();
-        }
-        if let Some(branch) = info.entry.branch.clone() {
-            let full = format!("refs/heads/{branch}");
-            let origin = git(repo, &["reflog", "show", "--format=%H%x1f%gs", &full])
-                .await
-                .ok()
-                .and_then(|out| parse_branch_origin(&out));
-            // Candidates are checked one by one, so `contains` can't await; resolve them first.
-            let needs_candidates = origin.as_ref().is_some_and(|o| {
-                o.from
-                    .as_deref()
-                    .and_then(|from| local_branch_for(from, &known_branches))
-                    .is_none()
-            });
-            if let Some(origin) = origin.as_ref().filter(|_| needs_candidates) {
-                for candidate in candidates.iter().filter(|c| **c != branch) {
-                    let key = (candidate.clone(), origin.start.clone());
-                    if contains_cache.contains_key(&key) {
-                        continue;
-                    }
-                    let candidate_ref = format!("refs/heads/{candidate}");
-                    let contained = git(
-                        repo,
-                        &[
-                            "merge-base",
-                            "--is-ancestor",
-                            "--end-of-options",
-                            &origin.start,
-                            &candidate_ref,
-                        ],
-                    )
-                    .await
-                    .is_ok();
-                    contains_cache.insert(key, contained);
-                    if contained {
-                        break;
-                    }
-                }
-            }
-            info.base = choose_base(
-                &branch,
-                origin.as_ref(),
-                &candidates,
-                &known_branches,
-                |candidate| {
-                    origin.as_ref().is_some_and(|o| {
-                        contains_cache
-                            .get(&(candidate.to_string(), o.start.clone()))
-                            .copied()
-                            .unwrap_or(false)
-                    })
-                },
-            );
-            if let Some(base) = &info.base {
-                let range = format!("refs/heads/{base}...{full}");
-                if let Ok(out) = git(
-                    repo,
-                    &[
-                        "rev-list",
-                        "--left-right",
-                        "--count",
-                        "--end-of-options",
-                        &range,
-                    ],
-                )
-                .await
-                {
-                    (info.ahead, info.behind) = parse_ahead_behind(&out);
-                }
-            }
-        }
-        infos.push(info);
+#[cfg(not(target_family = "wasm"))]
+async fn load_worktree(
+    repo: &Path,
+    entry: WorktreeEntry,
+    agents: Vec<AgentSession>,
+    candidates: &[String],
+    known_branches: &[String],
+) -> WorktreeInfo {
+    let mut info = WorktreeInfo {
+        base: None,
+        changed_files: 0,
+        ahead: 0,
+        behind: 0,
+        last_subject: String::new(),
+        last_time: 0,
+        agents,
+        entry,
+    };
+    if info.entry.prunable {
+        return info;
     }
-    Ok(infos)
+    let path = info.entry.path.clone();
+    let (status, last_commit, base) = futures::join!(
+        git(&path, &["status", "--porcelain"]),
+        git(&path, &["log", "-1", "--format=%ct%x1f%s", "HEAD"]),
+        find_base(
+            repo,
+            info.entry.branch.as_deref(),
+            candidates,
+            known_branches
+        ),
+    );
+    info.changed_files = status
+        .map(|out| out.lines().filter(|l| !l.trim().is_empty()).count())
+        .unwrap_or(0);
+    if let Ok(out) = last_commit
+        && let Some((time, subject)) = out.trim_end().split_once('\u{1f}')
+    {
+        info.last_time = time.parse().unwrap_or(0);
+        info.last_subject = subject.to_string();
+    }
+    if let (Some(base), Some(branch)) = (&base, &info.entry.branch) {
+        let range = format!("refs/heads/{base}...refs/heads/{branch}");
+        if let Ok(out) = git(
+            repo,
+            &[
+                "rev-list",
+                "--left-right",
+                "--count",
+                "--end-of-options",
+                &range,
+            ],
+        )
+        .await
+        {
+            (info.ahead, info.behind) = parse_ahead_behind(&out);
+        }
+    }
+    info.base = base;
+    info
+}
+
+/// See the module docs for how the base is chosen.
+#[cfg(not(target_family = "wasm"))]
+async fn find_base(
+    repo: &Path,
+    branch: Option<&str>,
+    candidates: &[String],
+    known_branches: &[String],
+) -> Option<String> {
+    let branch = branch?;
+    let full = format!("refs/heads/{branch}");
+    let origin = git(repo, &["reflog", "show", "--format=%H%x1f%gs", &full])
+        .await
+        .ok()
+        .and_then(|out| parse_branch_origin(&out));
+    let needs_candidates = origin.as_ref().is_some_and(|o| {
+        o.from
+            .as_deref()
+            .and_then(|from| local_branch_for(from, known_branches))
+            .is_none()
+    });
+    // `choose_base` can't await, so find the first candidate containing the start commit here.
+    let mut containing = None;
+    if let Some(origin) = origin.as_ref().filter(|_| needs_candidates) {
+        for candidate in candidates.iter().filter(|c| c.as_str() != branch) {
+            let candidate_ref = format!("refs/heads/{candidate}");
+            let contained = git(
+                repo,
+                &[
+                    "merge-base",
+                    "--is-ancestor",
+                    "--end-of-options",
+                    &origin.start,
+                    &candidate_ref,
+                ],
+            )
+            .await
+            .is_ok();
+            if contained {
+                containing = Some(candidate.clone());
+                break;
+            }
+        }
+    }
+    choose_base(
+        branch,
+        origin.as_ref(),
+        candidates,
+        known_branches,
+        |candidate| containing.as_deref() == Some(candidate),
+    )
 }
 
 /// Removes a linked worktree (refuses a dirty one, as plain `git worktree remove` does).
