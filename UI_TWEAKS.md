@@ -18,3 +18,6 @@ This is an unofficial fork, not affiliated with Warp.
   Palette).
 
 Each change has a setting and a Command Palette toggle, and is on by default.
+
+This fork has several branches (`git-graph`, `worktrees`, `ui-tweaks`, `daily`); the rules for
+working on them are in `GIT_GRAPH.md` on the `git-graph` branch.
