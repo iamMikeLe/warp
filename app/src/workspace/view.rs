@@ -8921,7 +8921,7 @@ impl Workspace {
             EditorLayout::SplitPane => {
                 self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
                     pane_group.add_pane_with_direction(
-                        Direction::Right,
+                        Direction::Left,
                         pane,
                         true, /* focus_new_pane */
                         ctx,
@@ -9112,7 +9112,7 @@ impl Workspace {
             EditorLayout::SplitPane => {
                 self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
                     pane_group.add_pane_with_direction(
-                        Direction::Right,
+                        Direction::Left,
                         pane,
                         !preview, /* focus_new_pane */
                         ctx,
@@ -13412,7 +13412,7 @@ impl Workspace {
                 EditorLayout::SplitPane => {
                     self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
                         pane_group.add_pane_with_direction(
-                            Direction::Right,
+                            Direction::Left,
                             pane,
                             true, /* focus_new_pane */
                             ctx,
