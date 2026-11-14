@@ -6794,6 +6794,11 @@ impl Workspace {
                     ctx,
                 );
             }
+            LeftPanelEvent::OpenTerminalInTab => {
+                self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
+                    pane_group.open_terminal_at_right_edge(ctx);
+                });
+            }
             LeftPanelEvent::SignInRequested => {
                 self.open_require_login_modal(AuthViewVariant::RequireLoginCloseable, ctx);
                 self.require_login_modal.update(ctx, |modal, ctx| {

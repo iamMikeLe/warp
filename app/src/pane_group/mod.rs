@@ -3997,6 +3997,18 @@ impl PaneGroup {
     }
 
     /// Used when splitting panes.
+    /// Opens a new terminal to the right of the tab's last pane, so it lands on the right edge.
+    pub fn open_terminal_at_right_edge(&mut self, ctx: &mut ViewContext<Self>) {
+        match self.panes.visible_pane_ids().last() {
+            Some(&last) => {
+                self.insert_terminal_pane(Direction::Right, last, None, ctx);
+            }
+            None => {
+                self.add_terminal_pane(Direction::Right, None, ctx);
+            }
+        }
+    }
+
     fn insert_terminal_pane(
         &mut self,
         direction: Direction,

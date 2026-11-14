@@ -77,15 +77,20 @@ struct MouseStateHandles {
     conversation_list_view_button: MouseStateHandle,
     global_search_button: MouseStateHandle,
     warp_drive_button: MouseStateHandle,
+    open_terminal_button: MouseStateHandle,
     sign_in_button: MouseStateHandle,
 }
 
 #[derive(Clone, Debug)]
 pub enum LeftPanelAction {
     ProjectExplorer,
-    GlobalSearch { entry_focus: GlobalSearchEntryFocus },
+    GlobalSearch {
+        entry_focus: GlobalSearchEntryFocus,
+    },
     WarpDrive,
     ConversationListView,
+    /// Open a new terminal at the right edge of the current tab (e.g. after closing the last one).
+    OpenTerminal,
     SignIn,
 }
 
@@ -143,6 +148,8 @@ pub enum LeftPanelEvent {
         terminal_view_id: Option<warpui::EntityId>,
     },
     SignInRequested,
+    /// Open a new terminal at the right edge of the current tab.
+    OpenTerminalInTab,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1040,7 +1047,7 @@ impl LeftPanelView {
                 LeftPanelAction::ConversationListView => {
                     self.active_view.get() == ToolPanelView::ConversationListView
                 }
-                LeftPanelAction::SignIn => false,
+                LeftPanelAction::OpenTerminal | LeftPanelAction::SignIn => false,
             };
         }
     }
@@ -1189,6 +1196,7 @@ impl LeftPanelView {
             LeftPanelAction::SignIn => {
                 ctx.emit(LeftPanelEvent::SignInRequested);
             }
+            LeftPanelAction::OpenTerminal => ctx.emit(LeftPanelEvent::OpenTerminalInTab),
         }
     }
 
@@ -1310,24 +1318,44 @@ impl View for LeftPanelView {
             self.mouse_state_handles.warp_drive_button.clone(),
         ];
 
-        // If there is only one button in the toolbelt row,
-        // there is no need to show it as it's a bit redundant.
-        let toolbelt_button_row = if self.toolbelt_buttons.len() > 1 {
-            Some(
-                Flex::row()
-                    .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                    .with_spacing(4.0)
-                    .with_children(self.toolbelt_buttons.iter().zip(&mouse_state_handles).map(
-                        |(button_config, mouse_state)| {
-                            Self::render_button(button_config, mouse_state.clone(), appearance)
-                        },
-                    ))
-                    .with_main_axis_size(MainAxisSize::Min)
-                    .finish(),
-            )
+        // A single view button is redundant, so it's only shown alongside others; the
+        // open-terminal button is always there, so a tab whose terminal was closed can get one back.
+        let open_terminal_button = Container::new(Self::render_button(
+            &ToolbeltButtonConfig {
+                icon: Icon::Terminal,
+                active_icon: None,
+                tooltip_text: "Open a terminal in this tab".to_string(),
+                action: LeftPanelAction::OpenTerminal,
+                render_with_active_state: false,
+                tooltip_keybinding: None,
+                tooltip_keybinding_names: Vec::new(),
+            },
+            self.mouse_state_handles.open_terminal_button.clone(),
+            appearance,
+        ))
+        .with_margin_left(if self.toolbelt_buttons.len() > 1 {
+            8.
         } else {
-            None
-        };
+            0.
+        })
+        .finish();
+        let toolbelt_button_row = Some(
+            Flex::row()
+                .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                .with_spacing(4.0)
+                .with_children(
+                    self.toolbelt_buttons
+                        .iter()
+                        .zip(&mouse_state_handles)
+                        .filter(|_| self.toolbelt_buttons.len() > 1)
+                        .map(|(button_config, mouse_state)| {
+                            Self::render_button(button_config, mouse_state.clone(), appearance)
+                        }),
+                )
+                .with_child(open_terminal_button)
+                .with_main_axis_size(MainAxisSize::Min)
+                .finish(),
+        );
 
         let active_view = self.active_view.get();
         let availability = self.active_view_availability(app);
