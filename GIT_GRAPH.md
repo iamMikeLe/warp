@@ -81,6 +81,10 @@ I picked it up from there. My work on top of it:
   button to open a terminal in the current tab.
 - **`japanese-themes`**: Samurai (dark) and Sakura (light) themes in traditional Japanese colours,
   based directly on upstream Warp.
+- **`search-replace`**: Replace (per match, per file, all) and Match Whole Word in global search,
+  based directly on upstream Warp.
+- **`tools-panel-order`**: reorder and show/hide the tools panel's buttons from Settings, based
+  directly on upstream Warp.
 - **`daily`**: everything combined; the build I use day to day.
 
 Rules for working on this fork (for me and for any coding agent working in it):
@@ -130,9 +134,11 @@ git switch git-graph   && git merge upstream/master   # merge, don't rebase: the
 git switch ui-tweaks   && git merge upstream/master
 git switch pane-layout && git merge upstream/master
 git switch japanese-themes && git merge upstream/master
+git switch search-replace && git merge upstream/master
+git switch tools-panel-order && git merge upstream/master
 git switch worktrees   && git merge git-graph
-git switch daily       && git merge worktrees ui-tweaks pane-layout japanese-themes
-git push origin git-graph ui-tweaks pane-layout japanese-themes worktrees daily
+git switch daily       && git merge worktrees ui-tweaks pane-layout japanese-themes search-replace tools-panel-order
+git push origin git-graph ui-tweaks pane-layout japanese-themes search-replace tools-panel-order worktrees daily
 ```
 
 If a build fails after an upstream merge, run `./script/bootstrap --skip-common-skills` once to
