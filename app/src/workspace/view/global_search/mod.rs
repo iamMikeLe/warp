@@ -10,8 +10,7 @@ pub struct SearchConfig {
 
 impl SearchConfig {
     /// The regex ripgrep runs for `pattern`: escaped unless regex mode is on, and wrapped in word
-    /// boundaries for whole-word matching. Replace builds its matcher from the same string, so it
-    /// finds exactly the matches the search showed.
+    /// boundaries for whole-word matching.
     pub fn effective_pattern(&self, pattern: &str) -> String {
         let pattern = if self.use_regex {
             pattern.to_string()
@@ -43,6 +42,8 @@ pub struct GlobalSearchMatch {
 #[cfg_attr(not(target_family = "wasm"), path = "model.rs")]
 #[cfg_attr(target_family = "wasm", path = "model_wasm.rs")]
 pub mod model;
-#[cfg(not(target_family = "wasm"))]
-pub mod replace;
 pub mod view;
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

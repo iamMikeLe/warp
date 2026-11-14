@@ -41,8 +41,6 @@ use warpui::{
 };
 
 use crate::TelemetryEvent;
-#[cfg(not(target_family = "wasm"))]
-use crate::code::global_buffer_model::GlobalBufferModel;
 use crate::code::icon_from_file_path;
 use crate::coding_panel_enablement_state::CodingPanelEnablementState;
 use crate::editor::{
@@ -57,8 +55,6 @@ use crate::ui_components::render_file_search_row::{FileSearchRowOptions, render_
 use crate::util::path::{display_name_with_host, display_path_with_host};
 use crate::view_components::action_button::{ActionButton, ButtonSize, NakedTheme};
 use crate::workspace::view::global_search::model::GlobalSearch;
-#[cfg(not(target_family = "wasm"))]
-use crate::workspace::view::global_search::replace::{ReplaceTarget, Replacer, SkipReason};
 use crate::workspace::view::global_search::{GlobalSearchMatch, SearchConfig};
 
 const BORDER_RADIUS: f32 = 6.;
@@ -112,19 +108,6 @@ pub enum GlobalSearchAction {
     ToggleRegexSearch,
     ToggleCaseSensitivity,
     ToggleWholeWord,
-    /// Show or hide the replace input.
-    ToggleReplace,
-    /// Replace one match: the `occurrence`-th (0-based) on its line, which still reads `expected`.
-    ReplaceMatch {
-        location: LocalOrRemotePath,
-        line_number: u32,
-        occurrence: usize,
-        expected: String,
-    },
-    ReplaceInFile {
-        location: LocalOrRemotePath,
-    },
-    ReplaceAll,
 }
 
 #[cfg_attr(target_family = "wasm", allow(dead_code))]
@@ -282,7 +265,6 @@ struct MatchedPath {
     path: LocalOrRemotePath,
     is_collapsed: bool,
     mouse_state: MouseStateHandle,
-    replace_mouse_state: MouseStateHandle,
     matches: Vec<Match>,
 }
 
@@ -292,7 +274,6 @@ impl MatchedPath {
             path,
             is_collapsed: false,
             mouse_state: MouseStateHandle::default(),
-            replace_mouse_state: MouseStateHandle::default(),
             matches: Vec::new(),
         }
     }
@@ -316,7 +297,6 @@ struct Match {
     column_num: Option<usize>,
     submatches: Vec<Submatch>,
     mouse_state: MouseStateHandle,
-    replace_mouse_state: MouseStateHandle,
 }
 
 impl Match {
@@ -332,7 +312,6 @@ impl Match {
             column_num,
             submatches,
             mouse_state: MouseStateHandle::default(),
-            replace_mouse_state: MouseStateHandle::default(),
         }
     }
 }
@@ -368,14 +347,6 @@ pub struct GlobalSearchView {
     case_sensitivity_button: ViewHandle<ActionButton>,
     whole_word_enabled: bool,
     whole_word_button: ViewHandle<ActionButton>,
-    replace_expanded: bool,
-    replace_toggle_mouse_state: MouseStateHandle,
-    replace_editor: ViewHandle<EditorView>,
-    replace_all_button: ViewHandle<ActionButton>,
-    /// True while replacements are being written.
-    replace_running: bool,
-    /// The outcome of the last replace, shown under the inputs.
-    replace_status: Option<String>,
 }
 
 impl Entity for GlobalSearchView {
@@ -541,45 +512,6 @@ impl TypedActionView for GlobalSearchView {
                     button.set_active(self.whole_word_enabled, ctx);
                 });
                 self.rerun_search_from_query(ctx, true);
-            }
-            GlobalSearchAction::ToggleReplace => {
-                self.replace_expanded = !self.replace_expanded;
-                if self.replace_expanded {
-                    ctx.focus(&self.replace_editor);
-                } else {
-                    self.replace_status = None;
-                }
-                ctx.notify();
-            }
-            GlobalSearchAction::ReplaceMatch {
-                location,
-                line_number,
-                occurrence,
-                expected,
-            } => self.replace(
-                vec![(
-                    location.clone(),
-                    ReplaceTarget::One {
-                        line_number: *line_number,
-                        occurrence: *occurrence,
-                        expected: expected.clone(),
-                    },
-                )],
-                ctx,
-            ),
-            GlobalSearchAction::ReplaceInFile { location } => {
-                self.replace(vec![(location.clone(), ReplaceTarget::All)], ctx)
-            }
-            GlobalSearchAction::ReplaceAll => {
-                let mut seen = std::collections::HashSet::new();
-                let files = self
-                    .directory_entries
-                    .iter()
-                    .flat_map(|dir| dir.matched_paths.paths.iter())
-                    .filter(|file| seen.insert(file.path.clone()))
-                    .map(|file| (file.path.clone(), ReplaceTarget::All))
-                    .collect();
-                self.replace(files, ctx);
             }
         }
     }
@@ -764,31 +696,6 @@ impl GlobalSearchView {
                 })
         });
 
-        let replace_editor = ctx.add_typed_action_view(|ctx| {
-            let appearance = Appearance::as_ref(ctx);
-            let options = EditorOptions {
-                text: TextOptions::ui_text(Some(14.), appearance),
-                select_all_on_focus: true,
-                clear_selections_on_blur: true,
-                propagate_horizontal_navigation_keys: PropagateHorizontalNavigationKeys::Always,
-                single_line: true,
-                ..Default::default()
-            };
-            let mut editor = EditorView::new(options, ctx);
-            editor.set_placeholder_text("Replace", ctx);
-            editor
-        });
-
-        let replace_all_button = ctx.add_typed_action_view(|_ctx| {
-            ActionButton::new_with_boxed_theme(String::new(), Arc::new(NakedTheme))
-                .with_icon(UiIcon::ReplaceAll)
-                .with_tooltip("Replace All")
-                .with_size(ButtonSize::Small)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(GlobalSearchAction::ReplaceAll);
-                })
-        });
-
         let regex_button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new_with_boxed_theme(String::new(), Arc::new(NakedTheme))
                 .with_icon(UiIcon::Regex)
@@ -836,12 +743,6 @@ impl GlobalSearchView {
             case_sensitivity_button,
             whole_word_enabled: false,
             whole_word_button,
-            replace_expanded: false,
-            replace_toggle_mouse_state: MouseStateHandle::default(),
-            replace_editor,
-            replace_all_button,
-            replace_running: false,
-            replace_status: None,
         }
     }
 
@@ -1004,88 +905,6 @@ impl GlobalSearchView {
         }
     }
 
-    fn search_config(&self) -> SearchConfig {
-        SearchConfig {
-            use_regex: self.regex_search_enabled,
-            use_case_sensitivity: self.case_sensitivity_enabled,
-            use_whole_word: self.whole_word_enabled,
-        }
-    }
-
-    /// Applies the replace input to `targets` in the background, then reports the outcome and
-    /// re-runs the search. Files with unsaved editor changes, and remote files, are left alone.
-    fn replace(
-        &mut self,
-        targets: Vec<(LocalOrRemotePath, ReplaceTarget)>,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        if self.replace_running || targets.is_empty() {
-            return;
-        }
-        let pattern = self.query_editor.as_ref(ctx).buffer_text(ctx);
-        let replacement = self.replace_editor.as_ref(ctx).buffer_text(ctx);
-        if pattern.is_empty() {
-            return;
-        }
-        #[cfg(not(target_family = "wasm"))]
-        {
-            let replacer = match Replacer::new(&pattern, self.search_config(), &replacement) {
-                Ok(replacer) => replacer,
-                Err(err) => {
-                    self.replace_status = Some(format!("Can't replace: {err}"));
-                    ctx.notify();
-                    return;
-                }
-            };
-            let mut skipped: Vec<(String, SkipReason)> = Vec::new();
-            let mut local: Vec<(std::path::PathBuf, String, ReplaceTarget)> = Vec::new();
-            let buffers = GlobalBufferModel::as_ref(ctx);
-            for (location, target) in targets {
-                let name = location.display_path();
-                match &location {
-                    LocalOrRemotePath::Remote(_) => skipped.push((
-                        name,
-                        SkipReason::Io("remote files can't be replaced yet".into()),
-                    )),
-                    LocalOrRemotePath::Local(_) if buffers.has_unsaved_changes(&location, ctx) => {
-                        skipped.push((name, SkipReason::UnsavedChanges))
-                    }
-                    LocalOrRemotePath::Local(path) => local.push((path.clone(), name, target)),
-                }
-            }
-            self.replace_running = true;
-            self.replace_status = Some("Replacing…".to_string());
-            ctx.notify();
-            ctx.spawn(
-                async move {
-                    let mut replaced = 0;
-                    let mut files_changed = 0;
-                    for (path, name, target) in local {
-                        match super::replace::replace_in_file(&path, &replacer, &target) {
-                            Ok(0) => {}
-                            Ok(count) => {
-                                replaced += count;
-                                files_changed += 1;
-                            }
-                            Err(reason) => skipped.push((name, reason)),
-                        }
-                    }
-                    (replaced, files_changed, skipped)
-                },
-                |view, (replaced, files_changed, skipped), ctx| {
-                    view.replace_running = false;
-                    view.replace_status = Some(replace_summary(replaced, files_changed, &skipped));
-                    view.rerun_search_from_query(ctx, true);
-                    ctx.notify();
-                },
-            );
-        }
-        #[cfg(target_family = "wasm")]
-        {
-            let _ = (targets, replacement);
-        }
-    }
-
     fn rerun_search_from_query(&mut self, ctx: &mut ViewContext<Self>, force: bool) {
         if !matches!(self.focus_mode, FocusMode::QueryEditor) && !force {
             return;
@@ -1121,7 +940,16 @@ impl GlobalSearchView {
 
         let roots = self.search_roots.clone();
         self.find_model.update(ctx, |model, model_ctx| {
-            model.run_search(pattern.clone(), roots, self.search_config(), model_ctx);
+            model.run_search(
+                pattern.clone(),
+                roots,
+                SearchConfig {
+                    use_regex: self.regex_search_enabled,
+                    use_case_sensitivity: self.case_sensitivity_enabled,
+                    use_whole_word: self.whole_word_enabled,
+                },
+                model_ctx,
+            );
         });
     }
 
@@ -1349,17 +1177,6 @@ impl GlobalSearchView {
         let is_selected = self.is_row_at_index_selected(index);
         let is_collapsed = matched_path.is_collapsed;
         let file_mouse_state = matched_path.mouse_state.clone();
-        let replace_in_file = self.replace_expanded.then(|| {
-            replace_button(
-                UiIcon::ReplaceAll,
-                "Replace All in File",
-                matched_path.replace_mouse_state.clone(),
-                GlobalSearchAction::ReplaceInFile {
-                    location: matched_path.path.clone(),
-                },
-                appearance,
-            )
-        });
         let file_path = matched_path.path.clone();
         let match_count = matched_path.matches.len();
 
@@ -1465,7 +1282,6 @@ impl GlobalSearchView {
                 .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
                 .with_child(Shrinkable::new(1.0, left_row).finish())
-                .with_children(replace_in_file.filter(|_| mouse_state.is_hovered()))
                 .with_child(count_badge)
                 .finish();
 
@@ -1538,32 +1354,6 @@ impl GlobalSearchView {
         let line_text = matched.line_text.clone();
         let submatches = matched.submatches.clone();
         let mouse_state = matched.mouse_state.clone();
-        // Each row is one submatch; which occurrence on its line it is identifies it for replace.
-        let replace_this = self
-            .replace_expanded
-            .then(|| {
-                let submatch = submatches.first()?;
-                let expected = line_text
-                    .get(submatch.byte_start.as_usize()..submatch.byte_end.as_usize())?
-                    .to_string();
-                let occurrence = matched_path.matches[..match_index]
-                    .iter()
-                    .filter(|other| other.line_number == line_number)
-                    .count();
-                Some(replace_button(
-                    UiIcon::Replace,
-                    "Replace",
-                    matched.replace_mouse_state.clone(),
-                    GlobalSearchAction::ReplaceMatch {
-                        location: matched_path.path.clone(),
-                        line_number,
-                        occurrence,
-                        expected,
-                    },
-                    appearance,
-                ))
-            })
-            .flatten();
 
         let directory_path_for_select = directory_path.clone();
         let file_path_for_select = matched_path.path.clone();
@@ -1600,16 +1390,7 @@ impl GlobalSearchView {
                 match_text = match_text.with_single_highlight(highlight, display_highlight_indices);
             }
 
-            let content: Box<dyn Element> = match replace_this.filter(|_| mouse_state.is_hovered())
-            {
-                Some(button) => Flex::row()
-                    .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                    .with_child(Shrinkable::new(1.0, match_text.finish()).finish())
-                    .with_child(button)
-                    .finish(),
-                None => match_text.finish(),
-            };
-            let mut row = Container::new(content)
+            let mut row = Container::new(match_text.finish())
                 .with_vertical_padding(4.)
                 .with_padding_left(32.) // 8px file indent + 24px (chevron + margin) to align with file icon
                 .with_padding_right(12.);
@@ -2378,81 +2159,10 @@ impl View for GlobalSearchView {
             })
             .finish();
 
-        // A chevron beside the search box shows or hides the replace box, as in VS Code.
-        let replace_expanded = self.replace_expanded;
-        let replace_toggle =
-            Hoverable::new(self.replace_toggle_mouse_state.clone(), move |state| {
-                let icon = if replace_expanded {
-                    Icon::ChevronDown
-                } else {
-                    Icon::ChevronRight
-                };
-                let color = if state.is_hovered() {
-                    blended_colors::text_main(theme, theme.background())
-                } else {
-                    blended_colors::text_sub(theme, theme.background())
-                };
-                Container::new(
-                    ConstrainedBox::new(icon.to_warpui_icon(ThemeFill::from(color)).finish())
-                        .with_width(16.)
-                        .with_height(16.)
-                        .finish(),
-                )
-                .with_margin_right(4.)
-                .with_margin_top(14.)
-                .finish()
-            })
-            .with_cursor(Cursor::PointingHand)
-            .on_click(|ctx, _, _| ctx.dispatch_typed_action(GlobalSearchAction::ToggleReplace))
-            .finish();
-
-        let mut inputs = Flex::column()
-            .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
-            .with_child(query_row);
-        if self.replace_expanded {
-            let replace_row = Flex::row()
-                .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                .with_child(
-                    Shrinkable::new(1.0, ChildView::new(&self.replace_editor).finish()).finish(),
-                )
-                .with_child(ChildView::new(&self.replace_all_button).finish())
-                .finish();
-            inputs = inputs.with_child(
-                Container::new(replace_row)
-                    .with_padding(Padding::uniform(6.))
-                    .with_border(Border::all(BORDER_WIDTH).with_border_fill(theme.surface_3()))
-                    .with_corner_radius(CornerRadius::with_all(Radius::Pixels(BORDER_RADIUS)))
-                    .with_margin_bottom(4.)
-                    .finish(),
-            );
-        }
-
         let mut header_column = Flex::column()
             .with_cross_axis_alignment(CrossAxisAlignment::Start)
             .with_child(search_label)
-            .with_child(
-                Flex::row()
-                    .with_cross_axis_alignment(CrossAxisAlignment::Start)
-                    .with_child(replace_toggle)
-                    .with_child(Shrinkable::new(1.0, inputs.finish()).finish())
-                    .finish(),
-            );
-        if let Some(status) = self
-            .replace_status
-            .as_ref()
-            .filter(|_| self.replace_expanded)
-        {
-            header_column = header_column.with_child(
-                Container::new(
-                    Text::new(status.clone(), appearance.ui_font_family(), 12.)
-                        .with_color(blended_colors::text_sub(theme, theme.background()))
-                        .finish(),
-                )
-                .with_margin_left(20.)
-                .with_margin_bottom(4.)
-                .finish(),
-            );
-        }
+            .with_child(query_row);
 
         let files = self.unique_match_count();
         let file_word = if files == 1 { "file" } else { "files" };
@@ -2679,95 +2389,4 @@ impl GlobalSearchView {
             app,
         )
     }
-}
-
-/// "Replaced 3 matches in 2 files. Skipped a.rs (unsaved changes)."
-#[cfg(not(target_family = "wasm"))]
-fn replace_summary(replaced: usize, files: usize, skipped: &[(String, SkipReason)]) -> String {
-    let matches = if replaced == 1 {
-        "1 match".to_string()
-    } else {
-        format!("{replaced} matches")
-    };
-    let files = if files == 1 {
-        "1 file".to_string()
-    } else {
-        format!("{files} files")
-    };
-    let mut summary = if replaced == 0 {
-        "Nothing replaced.".to_string()
-    } else {
-        format!("Replaced {matches} in {files}.")
-    };
-    if !skipped.is_empty() {
-        let reasons: Vec<String> = skipped
-            .iter()
-            .map(|(name, reason)| {
-                let name = name.rsplit('/').next().unwrap_or(name);
-                let why = match reason {
-                    SkipReason::UnsavedChanges => "unsaved changes".to_string(),
-                    SkipReason::Changed => "changed since the search".to_string(),
-                    SkipReason::Io(err) => err.clone(),
-                };
-                format!("{name} ({why})")
-            })
-            .collect();
-        summary.push_str(&format!(" Skipped {}.", reasons.join(", ")));
-    }
-    summary
-}
-
-/// A small icon button shown on a hovered result row while the replace box is open.
-fn replace_button(
-    icon: UiIcon,
-    tooltip: &'static str,
-    mouse_state: MouseStateHandle,
-    action: GlobalSearchAction,
-    appearance: &Appearance,
-) -> Box<dyn Element> {
-    let theme = appearance.theme();
-    let tooltip = appearance
-        .ui_builder()
-        .tool_tip(tooltip.to_string())
-        .build()
-        .finish();
-    Hoverable::new(mouse_state, move |state| {
-        let color = if state.is_hovered() {
-            theme.foreground().into()
-        } else {
-            blended_colors::text_sub(theme, theme.background())
-        };
-        let mut button = Container::new(
-            ConstrainedBox::new(icon.to_warpui_icon(ThemeFill::from(color)).finish())
-                .with_width(14.)
-                .with_height(14.)
-                .finish(),
-        )
-        .with_uniform_padding(3.)
-        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.)));
-        if state.is_hovered() {
-            button = button.with_background(internal_colors::fg_overlay_3(theme));
-        }
-        let mut stack = Stack::new().with_child(
-            Container::new(button.finish())
-                .with_margin_left(6.)
-                .with_margin_right(6.)
-                .finish(),
-        );
-        if state.is_hovered() {
-            stack.add_positioned_overlay_child(
-                tooltip,
-                OffsetPositioning::offset_from_parent(
-                    vec2f(0., 4.),
-                    ParentOffsetBounds::WindowByPosition,
-                    ParentAnchor::BottomMiddle,
-                    ChildAnchor::TopMiddle,
-                ),
-            );
-        }
-        stack.finish()
-    })
-    .with_cursor(Cursor::PointingHand)
-    .on_click(move |ctx, _, _| ctx.dispatch_typed_action(action.clone()))
-    .finish()
 }
