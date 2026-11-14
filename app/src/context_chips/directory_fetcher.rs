@@ -82,7 +82,7 @@ impl DirectoryFetcher {
     }
 
     /// Asynchronously list directory files using SessionContext
-    async fn fetch_files_async(
+    pub(super) async fn fetch_files_async(
         session_context: &SessionContext,
         dir_path: &str,
     ) -> Vec<DirectoryItem> {
@@ -158,6 +158,14 @@ impl Drop for DirectoryFetcher {
             handle.abort();
         }
     }
+}
+
+/// Lists `dir_path` through the session (local or remote): hidden entries excluded, folders first.
+pub(super) async fn list_directory(
+    session_context: &SessionContext,
+    dir_path: &str,
+) -> Vec<DirectoryItem> {
+    DirectoryFetcher::fetch_files_async(session_context, dir_path).await
 }
 
 #[derive(Debug, Clone, PartialOrd, PartialEq)]

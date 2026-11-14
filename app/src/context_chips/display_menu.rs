@@ -32,6 +32,8 @@ use warpui::{
     ViewContext, ViewHandle, WindowId,
 };
 
+use super::directory_fetcher::{DirectoryItem, DirectoryType};
+use super::nested_folders::{HoverOutcome, NestedFolderSource, NestedFolders, list_subfolders};
 use crate::ai::cloud_environments::CloudAmbientAgentEnvironment;
 use crate::cloud_object::CloudObjectLookup as _;
 use crate::cloud_object::model::generic_string_model::StringModel;
@@ -225,17 +227,37 @@ pub struct DisplayChipMenu {
     env_sidecar_copy_image_mouse_state: MouseStateHandle,
     env_sidecar_copy_feedback_times: HashMap<String, Instant>,
     env_sidecar_scroll_state: ClippedScrollStateHandle,
+
+    /// Hover-opened subfolder panels (working-directory menu only).
+    nested_folders: NestedFolders,
 }
 
 #[derive(Debug, Clone)]
 pub enum DisplayChipMenuAction {
-    SelectItem { index: usize },
-    Select { index: usize },
+    SelectItem {
+        index: usize,
+    },
+    Select {
+        index: usize,
+    },
     SelectUp,
     SelectDown,
     SelectEnter,
     SelectFixedFooterOption,
-    CopyEnvironmentSidecarField { key: String, value: String },
+    CopyEnvironmentSidecarField {
+        key: String,
+        value: String,
+    },
+    /// Hovering row `index` of nested folder panel `level` (1 = the panel next to the menu).
+    HoverNestedFolder {
+        level: usize,
+        index: usize,
+    },
+    /// Clicking row `index` of nested folder panel `level`: change to that folder.
+    OpenNestedFolder {
+        level: usize,
+        index: usize,
+    },
     Close,
 }
 
@@ -400,6 +422,7 @@ impl DisplayChipMenu {
             env_sidecar_copy_image_mouse_state: Default::default(),
             env_sidecar_copy_feedback_times: HashMap::new(),
             env_sidecar_scroll_state: Default::default(),
+            nested_folders: NestedFolders::default(),
         }
     }
 
@@ -433,6 +456,8 @@ impl DisplayChipMenu {
                 arc
             })
             .collect();
+        // The listing changed (e.g. a new working directory): cached subfolders may be stale.
+        self.nested_folders.reset();
         self.update_filtered_items();
         self.reset_selected_index();
 
@@ -445,6 +470,7 @@ impl DisplayChipMenu {
     }
 
     fn update_filtered_items(&mut self) {
+        self.nested_folders.close_from(0);
         if self.search_query.is_empty() {
             // No search query - show all items
             self.filtered_items = Rc::new(
@@ -530,6 +556,79 @@ impl DisplayChipMenu {
             self.selected_index = index;
             self.env_sidecar_scroll_state.scroll_to(Pixels::zero());
         }
+        self.open_folder_panel_for_selection(ctx);
+        ctx.notify();
+    }
+
+    /// Lets hovering a folder open a panel of its subfolders (see [`NestedFolders`]).
+    pub fn set_nested_folder_source(
+        &mut self,
+        source: Option<NestedFolderSource>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.nested_folders.set_source(source);
+        ctx.notify();
+    }
+
+    /// Opens the subfolder panel for the selected row if it's a folder, otherwise closes panels.
+    fn open_folder_panel_for_selection(&mut self, ctx: &mut ViewContext<Self>) {
+        if self.nested_folders.source.is_none() {
+            return;
+        }
+        let index = self.selected_index;
+        let folder = self
+            .filtered_items
+            .get(index)
+            .and_then(|item| item.item.as_any().downcast_ref::<DirectoryItem>())
+            .filter(|item| item.directory_type == DirectoryType::Directory)
+            .map(|item| item.name.clone());
+        match folder {
+            Some(folder) => {
+                let outcome =
+                    self.nested_folders
+                        .hover(0, folder, format!("MenuPromptChip-{index}"));
+                self.load_folder_panel(outcome, ctx);
+            }
+            None => self.nested_folders.close_from(0),
+        }
+    }
+
+    fn hover_nested_folder(&mut self, level: usize, index: usize, ctx: &mut ViewContext<Self>) {
+        let Some((folder, anchor)) = self.nested_folders.folder_in_panel(level, index) else {
+            return;
+        };
+        let outcome = self.nested_folders.hover(level, folder, anchor);
+        self.load_folder_panel(outcome, ctx);
+        ctx.notify();
+    }
+
+    fn load_folder_panel(&mut self, outcome: HoverOutcome, ctx: &mut ViewContext<Self>) {
+        if let HoverOutcome::Load { rel_path, source } = outcome {
+            ctx.spawn(
+                async move {
+                    let folders = list_subfolders(&source, &rel_path).await;
+                    (rel_path, folders)
+                },
+                |menu, (rel_path, folders), ctx| {
+                    menu.nested_folders.loaded(rel_path, folders);
+                    ctx.notify();
+                },
+            );
+        }
+    }
+
+    fn open_nested_folder(&mut self, level: usize, index: usize, ctx: &mut ViewContext<Self>) {
+        let Some((folder, _)) = self.nested_folders.folder_in_panel(level, index) else {
+            return;
+        };
+        self.nested_folders.close_from(0);
+        // The chip changes directory to the item's name, relative to the directory it shows.
+        ctx.emit(PromptDisplayMenuEvent::MenuAction(GenericMenuEvent {
+            action_item: Arc::new(DirectoryItem {
+                name: folder,
+                directory_type: DirectoryType::Directory,
+            }),
+        }));
         ctx.notify();
     }
 
@@ -619,6 +718,7 @@ impl DisplayChipMenu {
     }
 
     fn close(&mut self, ctx: &mut ViewContext<Self>) {
+        self.nested_folders.close_from(0);
         ctx.emit(PromptDisplayMenuEvent::CloseMenu);
         ctx.notify();
     }
@@ -1436,6 +1536,9 @@ impl View for DisplayChipMenu {
         {
             stack.add_positioned_overlay_child(sidecar, positioning);
         }
+        for (panel, positioning) in self.nested_folders.render(app) {
+            stack.add_positioned_overlay_child(panel, positioning);
+        }
 
         Dismiss::new(stack.finish())
             .on_dismiss(|ctx, _app| ctx.dispatch_typed_action(DisplayChipMenuAction::Close))
@@ -1496,6 +1599,12 @@ impl TypedActionView for DisplayChipMenu {
                 );
 
                 ctx.notify();
+            }
+            DisplayChipMenuAction::HoverNestedFolder { level, index } => {
+                self.hover_nested_folder(*level, *index, ctx)
+            }
+            DisplayChipMenuAction::OpenNestedFolder { level, index } => {
+                self.open_nested_folder(*level, *index, ctx)
             }
             DisplayChipMenuAction::Close => self.close(ctx),
         }
