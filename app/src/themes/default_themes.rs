@@ -218,6 +218,50 @@ const ADEBERRY_BRIGHT_COLORS: AnsiColors = AnsiColors::new(
     AnsiColor::from_u32(0xFFFFFFFF),
 );
 
+// Traditional Japanese colours: vermilion (shu), matcha, gold (kin), indigo (ai), sakura,
+// celadon (seiji), on sumi ink or washi paper.
+const SAMURAI_NORMAL_COLORS: AnsiColors = AnsiColors::new(
+    AnsiColor::from_u32(0x1C1719FF),
+    AnsiColor::from_u32(0xD9433BFF),
+    AnsiColor::from_u32(0x8FA35AFF),
+    AnsiColor::from_u32(0xD4A537FF),
+    AnsiColor::from_u32(0x4F7CACFF),
+    AnsiColor::from_u32(0xE07A9BFF),
+    AnsiColor::from_u32(0x5FA8A0FF),
+    AnsiColor::from_u32(0xE8DFCFFF),
+);
+const SAMURAI_BRIGHT_COLORS: AnsiColors = AnsiColors::new(
+    AnsiColor::from_u32(0x5A4C52FF),
+    AnsiColor::from_u32(0xF0605AFF),
+    AnsiColor::from_u32(0xA9C06EFF),
+    AnsiColor::from_u32(0xE8C15AFF),
+    AnsiColor::from_u32(0x7FA6D1FF),
+    AnsiColor::from_u32(0xF2A7BBFF),
+    AnsiColor::from_u32(0x86C7BEFF),
+    AnsiColor::from_u32(0xFFF8ECFF),
+);
+
+const SAKURA_NORMAL_COLORS: AnsiColors = AnsiColors::new(
+    AnsiColor::from_u32(0x2B2420FF),
+    AnsiColor::from_u32(0xC0392BFF),
+    AnsiColor::from_u32(0x5E7A2EFF),
+    AnsiColor::from_u32(0xA97A12FF),
+    AnsiColor::from_u32(0x2E4A6BFF),
+    AnsiColor::from_u32(0xB5466EFF),
+    AnsiColor::from_u32(0x2F7F79FF),
+    AnsiColor::from_u32(0xD9CCBCFF),
+);
+const SAKURA_BRIGHT_COLORS: AnsiColors = AnsiColors::new(
+    AnsiColor::from_u32(0x6B5E55FF),
+    AnsiColor::from_u32(0xD9433BFF),
+    AnsiColor::from_u32(0x6E8B3DFF),
+    AnsiColor::from_u32(0xC29421FF),
+    AnsiColor::from_u32(0x3F6491FF),
+    AnsiColor::from_u32(0xD9668AFF),
+    AnsiColor::from_u32(0x3E9A93FF),
+    AnsiColor::from_u32(0xF6EFE4FF),
+);
+
 pub(super) fn light_mode_colors() -> TerminalColors {
     TerminalColors::new(LIGHT_MODE_NORMAL_COLORS, LIGHT_MODE_BRIGHT_COLORS)
 }
@@ -282,6 +326,46 @@ pub fn light_theme() -> WarpTheme {
         light_mode_colors(),
         None,
         Some("Light".to_string()),
+    )
+}
+
+/// Dark Japanese theme: sumi ink with a vermilion accent, a red sun and a cherry branch.
+pub(super) fn samurai() -> WarpTheme {
+    WarpTheme::new(
+        Fill::VerticalGradient(VerticalGradient::new(
+            ColorU::from_u32(0x1E171BFF),
+            ColorU::from_u32(0x110E12FF),
+        )),
+        ColorU::from_u32(0xEDE4D3FF),
+        Fill::Solid(ColorU::from_u32(0xD9433BFF)),
+        None,
+        Some(Details::Darker),
+        TerminalColors::new(SAMURAI_NORMAL_COLORS, SAMURAI_BRIGHT_COLORS),
+        Some(Image {
+            source: bundled_or_fetched_asset!("jpg/samurai_bg.jpg"),
+            opacity: 35,
+        }),
+        Some("Samurai".to_string()),
+    )
+}
+
+/// Light Japanese theme: washi paper with a sakura accent and a cherry branch.
+pub(super) fn sakura() -> WarpTheme {
+    WarpTheme::new(
+        Fill::VerticalGradient(VerticalGradient::new(
+            ColorU::from_u32(0xFBF5ECFF),
+            ColorU::from_u32(0xF3E6DAFF),
+        )),
+        ColorU::from_u32(0x2B2420FF),
+        Fill::Solid(ColorU::from_u32(0xD9668AFF)),
+        None,
+        Some(Details::Lighter),
+        TerminalColors::new(SAKURA_NORMAL_COLORS, SAKURA_BRIGHT_COLORS),
+        Some(Image {
+            source: bundled_or_fetched_asset!("jpg/sakura_bg.jpg"),
+            opacity: 40,
+        }),
+        Some("Sakura".to_string()),
     )
 }
 

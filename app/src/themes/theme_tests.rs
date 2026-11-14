@@ -485,3 +485,17 @@ fn in_memory_theme_generation_test() {
         )
     );
 }
+
+#[test]
+fn japanese_themes_are_built_in() {
+    let config = WarpThemeConfig::new();
+    for (kind, name) in [
+        (ThemeKind::Samurai, "Samurai"),
+        (ThemeKind::Sakura, "Sakura"),
+    ] {
+        assert_eq!(kind.to_string(), name);
+        let theme = config.theme(&kind);
+        assert_eq!(theme.name().as_deref(), Some(name));
+        assert!(theme.background_image().is_some());
+    }
+}

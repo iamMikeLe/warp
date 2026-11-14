@@ -88,6 +88,10 @@ pub enum ThemeKind {
     PinkCity,
     #[schemars(description = "Marble")]
     Marble,
+    #[schemars(description = "Samurai")]
+    Samurai,
+    #[schemars(description = "Sakura")]
+    Sakura,
     #[schemars(description = "A user-provided custom theme loaded from a file.")]
     Custom(CustomTheme),
     /// Base16 themes are a special case of custom themes with their own semantics for ANSI colors that override "bright" color variants.
@@ -121,6 +125,8 @@ impl std::fmt::Display for ThemeKind {
             ThemeKind::Koi => "Koi",
             ThemeKind::Leafy => "Leafy",
             ThemeKind::Marble => "Marble",
+            ThemeKind::Samurai => "Samurai",
+            ThemeKind::Sakura => "Sakura",
             ThemeKind::PinkCity => "Pink City",
             ThemeKind::Snowy => "Snowy",
             ThemeKind::DarkCity => "Dark City",
@@ -492,6 +498,8 @@ impl WarpThemeConfig {
             (ThemeKind::Phenomenon, phenomenon()),
             (ThemeKind::SolarFlare, solar_flare()),
             (ThemeKind::Adeberry, adeberry()),
+            (ThemeKind::Samurai, samurai()),
+            (ThemeKind::Sakura, sakura()),
         ]);
         WarpThemeConfig { theme_map }
     }
