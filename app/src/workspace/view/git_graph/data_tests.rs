@@ -213,6 +213,7 @@ fn parse_commit_detail_extracts_header_and_files() {
             additions: 3,
             deletions: 1,
             status: FileStatus::Modified,
+            staged: false,
         }
     );
     // Binary files ("-") are treated as 0 insertions/deletions.
@@ -223,6 +224,7 @@ fn parse_commit_detail_extracts_header_and_files() {
             additions: 0,
             deletions: 0,
             status: FileStatus::Modified,
+            staged: false,
         }
     );
 }

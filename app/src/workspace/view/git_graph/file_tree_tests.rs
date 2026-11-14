@@ -13,6 +13,7 @@ fn file(path: &str, additions: u32, deletions: u32) -> ChangedFile {
         additions,
         deletions,
         status: FileStatus::Modified,
+        staged: false,
     }
 }
 
