@@ -6867,7 +6867,7 @@ impl Workspace {
     /// Mirrors the behavior of "open file": it does not open a new tab. If the current tab already
     /// has a commit diff pane, **its content is updated in place** and focused (clicking several
     /// files in a row reuses the same pane, and since the pane is not destroyed the header/close
-    /// button persist); otherwise a new pane is split off to the right of the current pane group
+    /// button persist); otherwise a new pane is split off to the left of the current pane group
     /// and focused.
     #[cfg(not(target_family = "wasm"))]
     fn open_commit_file_diff(
@@ -6901,7 +6901,7 @@ impl Workspace {
             return;
         }
 
-        // First time: split off a new pane to the right of the current tab and focus it.
+        // First time: split off a new pane in the current tab and focus it.
         let view = ctx.add_typed_action_view(move |ctx| {
             crate::code::commit_diff_view::CommitDiffView::new(
                 repo_relative_path,
@@ -6913,8 +6913,9 @@ impl Workspace {
             )
         });
         let pane = CommitDiffPane::from_view(view, ctx);
+        // Open to the left so the terminal stays on the right edge of the tab.
         self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
-            pane_group.add_pane_with_direction(Direction::Right, pane, true, ctx);
+            pane_group.add_pane_with_direction(Direction::Left, pane, true, ctx);
         });
     }
 
@@ -9036,7 +9037,7 @@ impl Workspace {
             EditorLayout::SplitPane => {
                 self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
                     pane_group.add_pane_with_direction(
-                        Direction::Right,
+                        Direction::Left,
                         pane,
                         true, /* focus_new_pane */
                         ctx,
@@ -9227,7 +9228,7 @@ impl Workspace {
             EditorLayout::SplitPane => {
                 self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
                     pane_group.add_pane_with_direction(
-                        Direction::Right,
+                        Direction::Left,
                         pane,
                         !preview, /* focus_new_pane */
                         ctx,
@@ -13527,7 +13528,7 @@ impl Workspace {
                 EditorLayout::SplitPane => {
                     self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
                         pane_group.add_pane_with_direction(
-                            Direction::Right,
+                            Direction::Left,
                             pane,
                             true, /* focus_new_pane */
                             ctx,
