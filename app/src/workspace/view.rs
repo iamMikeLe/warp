@@ -3269,6 +3269,7 @@ impl Workspace {
                 event,
                 CodeSettingsChangedEvent::ShowProjectExplorer { .. }
                     | CodeSettingsChangedEvent::ShowGlobalSearch { .. }
+                    | CodeSettingsChangedEvent::ToolsPanelOrder { .. }
             ) {
                 me.update_left_panel_available_views(ctx);
                 ctx.notify();
@@ -24262,6 +24263,11 @@ impl Workspace {
         {
             views.push(ToolPanelView::Worktrees);
         }
+        left_panel::sort_by_saved_order(
+            &mut views,
+            |view| view.stable_id(),
+            &CodeSettings::as_ref(ctx).tools_panel_order,
+        );
         views
     }
 
