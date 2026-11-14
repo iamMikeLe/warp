@@ -782,3 +782,33 @@ fn test_hide_multiple_child_agent_panes() {
     assert_eq!(tree.visible_pane_ids(), vec![panes[0], panes[1]]);
     assert!(tree.is_pane_hidden(&panes[2]));
 }
+
+#[test]
+fn collapse_needs_an_expanded_sibling_in_the_same_split() {
+    let [a, b, c] = [
+        PaneId::dummy_pane_id(),
+        PaneId::dummy_pane_id(),
+        PaneId::dummy_pane_id(),
+    ];
+    // a | (b over c)
+    let mut panes = PaneData::new(a);
+    panes.split(a, b, Direction::Right);
+    panes.split(b, c, Direction::Down);
+    let none = |_: PaneId| false;
+
+    // A lone pane in the group has nothing to give its space to.
+    assert!(!PaneData::new(a).has_expanded_sibling(a, &none));
+
+    assert!(panes.has_expanded_sibling(a, &none));
+    assert!(panes.has_expanded_sibling(b, &none));
+
+    // With c collapsed, b is the only expanded pane in its stack; a can still collapse because
+    // the (b over c) branch keeps an expanded pane.
+    let c_collapsed = move |id: PaneId| id == c;
+    assert!(!panes.has_expanded_sibling(b, &c_collapsed));
+    assert!(panes.has_expanded_sibling(a, &c_collapsed));
+
+    // With b and c both collapsed, a can't collapse: nothing on the other side stays expanded.
+    let both = move |id: PaneId| id == b || id == c;
+    assert!(!panes.has_expanded_sibling(a, &both));
+}

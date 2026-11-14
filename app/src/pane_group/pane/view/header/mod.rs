@@ -60,6 +60,8 @@ pub enum Event<A: ActionPayload, B: ActionPayload> {
     CustomAction(B),
     /// The close button on the header was clicked.
     Close,
+    /// The collapse button on the header was clicked.
+    ToggleCollapsed,
     /// This header has been dragged over the pane with target_id at the location
     MovePaneWithinPaneGroup {
         target_id: PaneId,
@@ -101,6 +103,7 @@ pub enum PaneHeaderAction<A: ActionPayload, B: ActionPayload> {
     OpenOverflowMenu,
     ShareContents,
     Close,
+    ToggleCollapsed,
     PaneHeaderDragStarted,
     PaneHeaderDragged {
         origin: ActionOrigin,
@@ -395,6 +398,7 @@ impl<P: BackingView> PaneHeader<P> {
 #[derive(Default)]
 struct MouseStateHandles {
     close_button_handle: MouseStateHandle,
+    collapse_button_handle: MouseStateHandle,
     overflow_button_handle: MouseStateHandle,
     draggable_state: DraggableState,
     header_click_handle: MouseStateHandle,
@@ -758,6 +762,7 @@ impl<P: BackingView> View for PaneHeader<P> {
         let header_ctx = HeaderRenderContext {
             draggable_state: self.mouse_state_handles.draggable_state.clone(),
             close_button_mouse_state: self.mouse_state_handles.close_button_handle.clone(),
+            collapse_button_mouse_state: self.mouse_state_handles.collapse_button_handle.clone(),
             overflow_button_mouse_state: self.mouse_state_handles.overflow_button_handle.clone(),
             overflow_button_position_id: self.overflow_button_position_id(),
             has_overflow_items,
@@ -906,6 +911,7 @@ impl<P: BackingView> TypedActionView for PaneHeader<P> {
     fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
         match action {
             PaneHeaderAction::Close => ctx.emit(Event::Close),
+            PaneHeaderAction::ToggleCollapsed => ctx.emit(Event::ToggleCollapsed),
             PaneHeaderAction::OverflowMenuAction(action) => {
                 ctx.emit(Event::SelectedOverflowMenuAction(action.to_owned()));
             }
