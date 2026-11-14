@@ -119,10 +119,11 @@ left (or the left panel button when vertical tabs are off), then the branch icon
 ## Installing it as an app (DMG, `daily` only)
 
 ```sh
-script/macos/personal_dmg            # writes ~/Desktop/WarpOss.dmg
+cargo install --locked cargo-about@0.8.4   # once: used for the bundled license file
+script/macos/personal_dmg                  # writes ~/Desktop/WarpOss.dmg
 ```
 
-Builds a release WarpOss for this Mac, signs it with the Mac's own certificate, and packages it
+Builds a release WarpOss for this Mac, signs it locally, and packages it
 as a drag-to-Applications DMG. It isn't notarized: on another Mac, right-click the app and choose
 **Open** the first time. Rebuild and reinstall to update.
 
