@@ -91,6 +91,9 @@ const END_OF_OPTIONS: &str = "--end-of-options";
 /// `refs/heads/<branch>`: a fully qualified branch ref can't start with `-`, so
 /// a hostile branch name from a remote (e.g. `--upload-pack=<cmd>`) can't be
 /// parsed by `git push` / `git pull` as an option.
+/// Makes git read pathspecs as plain paths (no globs or `:(magic)`).
+const LITERAL_PATHSPECS: &str = "--literal-pathspecs";
+
 fn qualified_branch(branch: &str) -> String {
     format!("refs/heads/{branch}")
 }
@@ -189,6 +192,19 @@ pub(crate) enum GitWriteOp {
         name: String,
         force: bool,
     },
+    /// `git add -A -- <paths>`: stages the files' changes, including deletions.
+    StageFiles { paths: Vec<String> },
+    /// `git add -A`: stages every change in the working tree.
+    StageAll,
+    /// `git reset -q -- <paths>`: unstages the files, keeping their changes in the working tree.
+    UnstageFiles { paths: Vec<String> },
+    /// `git reset -q`: unstages everything.
+    UnstageAll,
+    /// `git commit -m <summary> [-m <description>]` of the staged changes.
+    Commit {
+        summary: String,
+        description: String,
+    },
     /// `git archive --format <fmt> -o <output> <rev>`.
     Archive {
         rev: String,
@@ -198,6 +214,17 @@ pub(crate) enum GitWriteOp {
 }
 
 impl GitWriteOp {
+    /// Staging and unstaging: quick index updates that refresh only the uncommitted changes.
+    pub(crate) fn is_staging(&self) -> bool {
+        matches!(
+            self,
+            GitWriteOp::StageFiles { .. }
+                | GitWriteOp::StageAll
+                | GitWriteOp::UnstageFiles { .. }
+                | GitWriteOp::UnstageAll
+        )
+    }
+
     /// The exact `git` argument vector for this operation. Pure (no IO) so it can
     /// be unit-tested; `run_write_op` borrows these as `&str`s.
     pub(crate) fn args(&self) -> Vec<String> {
@@ -364,6 +391,41 @@ impl GitWriteOp {
                 args.push(qualified_tag(name));
                 args
             }
+            // Paths go after `--` and are read literally, so a file named like an option or a
+            // pathspec pattern (`:(glob)*`, `*.rs`) only ever means that file.
+            GitWriteOp::StageFiles { paths } => {
+                let mut args = vec![
+                    LITERAL_PATHSPECS.into(),
+                    "add".into(),
+                    "-A".into(),
+                    "--".into(),
+                ];
+                args.extend(paths.iter().cloned());
+                args
+            }
+            GitWriteOp::StageAll => vec!["add".into(), "-A".into()],
+            GitWriteOp::UnstageFiles { paths } => {
+                let mut args = vec![
+                    LITERAL_PATHSPECS.into(),
+                    "reset".into(),
+                    "-q".into(),
+                    "--".into(),
+                ];
+                args.extend(paths.iter().cloned());
+                args
+            }
+            GitWriteOp::UnstageAll => vec!["reset".into(), "-q".into()],
+            GitWriteOp::Commit {
+                summary,
+                description,
+            } => {
+                let mut args = vec!["commit".into(), "-m".into(), summary.clone()];
+                if !description.trim().is_empty() {
+                    args.push("-m".into());
+                    args.push(description.clone());
+                }
+                args
+            }
             GitWriteOp::Archive {
                 rev,
                 output,
@@ -398,7 +460,13 @@ impl GitWriteOp {
             GitWriteOp::RebaseOntoBranch { branch } | GitWriteOp::CheckoutBranch { branch, .. } => {
                 vec![branch]
             }
-            GitWriteOp::CleanUntracked { .. } | GitWriteOp::Stash { .. } => vec![],
+            GitWriteOp::CleanUntracked { .. }
+            | GitWriteOp::Stash { .. }
+            | GitWriteOp::StageAll
+            | GitWriteOp::UnstageAll
+            | GitWriteOp::Commit { .. } => vec![],
+            // Paths follow `--`, where a leading `-` can't be read as an option.
+            GitWriteOp::StageFiles { .. } | GitWriteOp::UnstageFiles { .. } => vec![],
             GitWriteOp::StashApply { selector }
             | GitWriteOp::StashPop { selector }
             | GitWriteOp::StashDrop { selector } => vec![selector],
@@ -421,6 +489,17 @@ impl GitWriteOp {
     /// every op, including those where [`END_OF_OPTIONS`] isn't honored.
     #[cfg_attr(target_family = "wasm", allow(dead_code))]
     pub(crate) fn validate(&self) -> std::result::Result<(), String> {
+        match self {
+            GitWriteOp::Commit { summary, .. } if summary.trim().is_empty() => {
+                return Err("A commit needs a summary.".to_string());
+            }
+            GitWriteOp::StageFiles { paths } | GitWriteOp::UnstageFiles { paths }
+                if paths.is_empty() || paths.iter().any(String::is_empty) =>
+            {
+                return Err("No files to stage or unstage.".to_string());
+            }
+            _ => {}
+        }
         for operand in self.operands() {
             if operand.is_empty() {
                 return Err("Refusing to run git with an empty name.".to_string());
@@ -462,6 +541,11 @@ impl GitWriteOp {
             | GitWriteOp::RenameBranch { .. }
             | GitWriteOp::Stash { .. }
             | GitWriteOp::StashBranch { .. }
+            | GitWriteOp::StageFiles { .. }
+            | GitWriteOp::StageAll
+            | GitWriteOp::UnstageFiles { .. }
+            | GitWriteOp::UnstageAll
+            | GitWriteOp::Commit { .. }
             | GitWriteOp::Archive { .. } => None,
             GitWriteOp::CheckoutCommit { hash, .. } => Some(format!(
                 "Check out commit {} as a detached HEAD?",

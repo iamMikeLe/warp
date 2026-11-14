@@ -17,6 +17,9 @@ where many branches, worktrees, and stashes pile up quickly.
 - **Commit details:** message, author, committer, timestamps, and changed files with
   `+/-` counts; clicking a file opens a read-only diff, and clicking a parent hash jumps to it
   (loading older history if needed).
+- **Stage and commit:** selecting the WIP row shows unstaged and staged files separately; stage
+  or unstage one file (hover it) or everything at once, open either side's diff, and commit with a
+  summary (with a 72-character guide) and an optional description. Cmd/Ctrl+Enter commits.
 - **Navigation:** a repository picker for folders with several repos, a branch filter,
   paging with "load more", and auto-refresh when the repository changes.
 - **Git operations (right-click):** checkout, create/rename/delete branches and tags,

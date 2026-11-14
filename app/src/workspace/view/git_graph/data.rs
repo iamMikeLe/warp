@@ -609,6 +609,9 @@ pub(crate) struct ChangedFile {
     pub additions: u32,
     pub deletions: u32,
     pub status: FileStatus,
+    /// For the uncommitted changes: whether this entry is the staged side (index vs HEAD) or the
+    /// unstaged side (working tree vs index). A file with both kinds of change appears twice.
+    pub staged: bool,
 }
 
 /// Details of the selected commit: committer info, full commit message, and the
@@ -737,6 +740,7 @@ fn parse_numstat(stdout: &str) -> Vec<ChangedFile> {
                 additions: additions.parse::<u32>().unwrap_or(0),
                 deletions: deletions.parse::<u32>().unwrap_or(0),
                 status: FileStatus::Modified,
+                staged: false,
             })
         })
         .collect()
@@ -896,23 +900,30 @@ pub(crate) async fn load_file_diff_at_commit(
     })
 }
 
-/// Load the working tree's uncommitted changes as a detail (reusing
-/// [`CommitDetail`]): tracked changes vs HEAD (`git diff HEAD --numstat`) plus
-/// untracked files. `committer`/`message` are left empty — the view renders a
-/// dedicated "Uncommitted Changes" header instead.
+/// Loads the uncommitted changes as two lists in one: the staged files (index vs HEAD; against
+/// the empty tree before the first commit) and the unstaged ones (working tree vs index, plus
+/// untracked files), told apart by [`ChangedFile::staged`].
 #[cfg(not(target_family = "wasm"))]
 pub(crate) async fn load_uncommitted_detail(repo_root: &Path) -> Result<CommitDetail> {
-    let numstat = warp_util::git::run_git_command(
-        repo_root,
-        &["diff", "HEAD", "--numstat", "--summary", "--no-color"],
-    )
-    .await
-    .unwrap_or_default();
-    let mut files = parse_numstat(&numstat);
-    apply_summary(&mut files, &numstat);
-    // Untracked files aren't part of `git diff HEAD`; list them and diff each
-    // against an empty base so its lines count as additions (a new file is all
-    // additions, no deletions; binary → 0, like `parse_numstat`).
+    let numstat = |cached: bool| async move {
+        let mut args = vec!["diff", "--numstat", "--summary", "--no-color"];
+        if cached {
+            args.insert(1, "--cached");
+        }
+        let out = warp_util::git::run_git_command(repo_root, &args)
+            .await
+            .unwrap_or_default();
+        let mut files = parse_numstat(&out);
+        apply_summary(&mut files, &out);
+        for file in &mut files {
+            file.staged = cached;
+        }
+        files
+    };
+    let (mut files, unstaged) = futures::join!(numstat(true), numstat(false));
+    files.extend(unstaged);
+    // Untracked files aren't part of `git diff`; list them and diff each against an empty base
+    // so its lines count as additions (binary → 0, like `parse_numstat`).
     let untracked =
         warp_util::git::run_git_command(repo_root, &["ls-files", "--others", "--exclude-standard"])
             .await
@@ -925,6 +936,7 @@ pub(crate) async fn load_uncommitted_detail(repo_root: &Path) -> Result<CommitDe
                 "--no-index",
                 "--numstat",
                 "--no-color",
+                "--",
                 "/dev/null",
                 path,
             ],
@@ -940,45 +952,53 @@ pub(crate) async fn load_uncommitted_detail(repo_root: &Path) -> Result<CommitDe
             additions,
             deletions: 0,
             status: FileStatus::Added,
+            staged: false,
         });
     }
     Ok(CommitDetail {
         committer_name: String::new(),
         committer_email: String::new(),
         committer_time: 0,
-        // Used as the detail's subject line (render_detail_body falls back to the
-        // message when there's no commit).
         message: "Uncommitted changes".to_string(),
         files,
     })
 }
 
-/// Load the working tree's change to a single file (working vs HEAD), for the
-/// uncommitted row's "click a file → diff pane". Mirrors
-/// [`load_file_diff_at_commit`] but against the working tree.
+/// Load one side of a file's uncommitted change for the diff pane: the staged side (index vs
+/// HEAD) or the unstaged side (working tree vs index, or the whole file for an untracked one).
+/// Mirrors [`load_file_diff_at_commit`].
 #[cfg(not(target_family = "wasm"))]
 pub(crate) async fn load_uncommitted_file_diff(
     repo_root: &Path,
     path: &str,
+    staged: bool,
 ) -> Result<CommitFileDiff> {
     use crate::code_review::diff_state::LocalDiffStateModel;
 
-    // base: file content at HEAD; empty for an untracked / newly added file.
-    let base_spec = format!("HEAD:{path}");
+    // The base is the file at HEAD for the staged side and in the index for the unstaged side;
+    // empty when it isn't there (a new or untracked file).
+    let base_spec = if staged {
+        format!("HEAD:{path}")
+    } else {
+        format!(":{path}")
+    };
     let base_content = warp_util::git::run_git_command(repo_root, &["show", base_spec.as_str()])
         .await
         .unwrap_or_default();
 
-    // diff: working tree vs HEAD for tracked changes; an untracked file isn't in
-    // `git diff HEAD`, so fall back to showing the whole file as added.
-    let mut diff_output =
-        warp_util::git::run_git_command(repo_root, &["diff", "--no-color", "HEAD", "--", path])
-            .await
-            .unwrap_or_default();
-    if diff_output.trim().is_empty() {
+    let mut diff_args = vec!["--literal-pathspecs", "diff", "--no-color"];
+    if staged {
+        diff_args.push("--cached");
+    }
+    diff_args.extend(["--", path]);
+    let mut diff_output = warp_util::git::run_git_command(repo_root, &diff_args)
+        .await
+        .unwrap_or_default();
+    if diff_output.trim().is_empty() && !staged {
+        // An untracked file isn't in `git diff`: show the whole file as added.
         diff_output = warp_util::git::run_git_command(
             repo_root,
-            &["diff", "--no-color", "--no-index", "/dev/null", path],
+            &["diff", "--no-color", "--no-index", "--", "/dev/null", path],
         )
         .await
         .unwrap_or_default();

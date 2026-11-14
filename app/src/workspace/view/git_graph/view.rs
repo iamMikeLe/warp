@@ -62,7 +62,10 @@ use super::menu::{DEFAULT_PUSH_REMOTE, MenuKind, PromptKind, build_menu};
 use super::ops::{GitWriteOp, ResetMode, archive_format_from_path};
 use crate::appearance::Appearance;
 use crate::code::editor::{add_color, remove_color};
-use crate::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions};
+use crate::editor::{
+    EditorOptions, EditorView, EnterAction, EnterSettings, Event as EditorEvent,
+    SingleLineEditorOptions, TextOptions,
+};
 use crate::features::FeatureFlag;
 use crate::menu::{Menu, MenuItem, MenuItemFields};
 use crate::report_if_error;
@@ -136,6 +139,13 @@ pub(crate) enum GitGraphAction {
     SelectUncommitted,
     /// Save the Branch / Tag and Graph column widths (dispatched when a header drag ends).
     SaveColumnWidths,
+    /// Stage / unstage the Nth file of the uncommitted detail.
+    StageFile(usize),
+    UnstageFile(usize),
+    StageAll,
+    UnstageAll,
+    /// Commit the staged changes with the commit box's summary and description.
+    Commit,
     /// Switch to the Nth repository in the discovered list (dispatched by the
     /// top dropdown when there are multiple repos).
     SelectRepository(usize),
@@ -175,7 +185,11 @@ pub(crate) enum GitGraphAction {
     /// Open the context menu for a right-click target at the given offset
     /// (relative to the panel root). `x`/`y` are carried as scalars because
     /// `Vector2F` is not `PartialEq` (required by this enum).
-    OpenMenu { kind: MenuKind, x: f32, y: f32 },
+    OpenMenu {
+        kind: MenuKind,
+        x: f32,
+        y: f32,
+    },
     /// Write `text` to the clipboard (commit hash / subject / ref name).
     CopyToClipboard(String),
     /// Open the text-input dialog to collect a name (branch / rename).
@@ -186,7 +200,9 @@ pub(crate) enum GitGraphAction {
     /// the commit at `hash`. Distinct from [`PromptInput`] because the dialog
     /// owns a checkbox that chains a follow-up [`GitWriteOp::PushTag`] after the
     /// local tag is created.
-    OpenAddTag { hash: String },
+    OpenAddTag {
+        hash: String,
+    },
     /// Toggle the "Push to remote" checkbox in the open Add-tag dialog.
     ToggleAddTagPush,
     /// Submit the Add-tag dialog: build [`GitWriteOp::AddTag`] from the entered
@@ -202,7 +218,9 @@ pub(crate) enum GitGraphAction {
     /// the untracked toggle, then run it.
     SubmitStash,
     /// Open the reset-mode dialog (soft / mixed / hard) for the commit.
-    PromptResetMode { hash: String },
+    PromptResetMode {
+        hash: String,
+    },
     /// Open the reset dialog for the uncommitted-changes row (mixed / hard reset
     /// to HEAD, discarding working-tree / index changes; soft is a no-op here).
     PromptResetUncommitted,
@@ -217,7 +235,10 @@ pub(crate) enum GitGraphAction {
     ToggleConfirmOption,
     /// Open the OS save dialog for "Create Archive"; the chosen path drives the
     /// archive format and the actual run.
-    BeginArchive { rev: String, suggested_name: String },
+    BeginArchive {
+        rev: String,
+        suggested_name: String,
+    },
     /// Cancel any open dialog (input / confirm / reset-mode).
     CancelDialog,
     /// Dismiss the operation-error banner.
@@ -498,6 +519,14 @@ pub(crate) struct GitGraphView {
     /// True while a write op is running (reentrancy guard: blocks a second op and
     /// dims the panel).
     op_running: bool,
+    /// The running op is a quick staging update: no "Working…" overlay.
+    op_quiet: bool,
+    commit_summary_editor: ViewHandle<EditorView>,
+    commit_description_editor: ViewHandle<EditorView>,
+    /// Characters in the commit summary, kept in sync with the editor for the counter and button.
+    commit_summary_len: usize,
+    staging_mouse_states: super::staging::StagingMouseStates,
+    staging_scroll_state: ClippedScrollStateHandle,
     /// One-shot follow-up to run after the next successful op (currently only
     /// set by [`Self::submit_add_tag`] when "Push to remote" is checked, so a
     /// successful `git tag` is followed by a `git push` of that tag). Cleared
@@ -672,6 +701,8 @@ impl GitGraphView {
             }
         });
 
+        let (commit_summary_editor, commit_description_editor) = Self::commit_editors(ctx);
+
         // Single-line editor backing the text-input dialog. Enter submits,
         // Escape cancels.
         let dialog_input =
@@ -768,6 +799,12 @@ impl GitGraphView {
             dialog_input,
             dialog_button_mouse_states: (0..4).map(|_| MouseStateHandle::default()).collect(),
             op_running: false,
+            op_quiet: false,
+            commit_summary_editor,
+            commit_description_editor,
+            commit_summary_len: 0,
+            staging_mouse_states: Default::default(),
+            staging_scroll_state: ClippedScrollStateHandle::new(),
             pending_follow_up: None,
             op_error: None,
             op_error_dismiss_mouse_state: MouseStateHandle::default(),
@@ -1805,13 +1842,16 @@ impl GitGraphView {
         // diffs the commit against its parent.
         if self.uncommitted_selected {
             let load_path = path.clone();
+            let staged = file.staged;
             ctx.spawn(
-                async move { super::data::load_uncommitted_file_diff(&dir, &load_path).await },
+                async move {
+                    super::data::load_uncommitted_file_diff(&dir, &load_path, staged).await
+                },
                 move |_view, result, ctx| match result {
                     Ok(diff) => {
                         ctx.emit(GitGraphEvent::OpenCommitFileDiff {
                             repo_relative_path: path,
-                            short_hash: "working tree".to_string(),
+                            short_hash: if staged { "staged" } else { "working tree" }.to_string(),
                             base_content: diff.base_content,
                             hunks: diff.hunks,
                             preview: diff.preview,
@@ -1859,7 +1899,98 @@ impl GitGraphView {
     /// Rebuilds the detail area's hover mouse-states for a freshly loaded file
     /// set: one per file row (indexed parallel to `files`) plus one per
     /// directory row in the file tree (keyed by full directory path).
+    /// The commit box's editors: a one-line summary (Enter moves to the description) and a
+    /// wrapping description; Cmd/Ctrl+Enter in either commits.
+    fn commit_editors(
+        ctx: &mut ViewContext<Self>,
+    ) -> (ViewHandle<EditorView>, ViewHandle<EditorView>) {
+        let ui_text = {
+            let appearance = Appearance::as_ref(ctx);
+            TextOptions::ui_text(Some(appearance.ui_font_size()), appearance)
+        };
+        let summary = ctx.add_view(|ctx| {
+            let mut editor = EditorView::single_line(
+                SingleLineEditorOptions {
+                    text: ui_text.clone(),
+                    ..Default::default()
+                },
+                ctx,
+            );
+            editor.set_placeholder_text("Summary", ctx);
+            editor
+        });
+        let description = ctx.add_view(|ctx| {
+            let mut editor = EditorView::new(
+                EditorOptions {
+                    text: ui_text,
+                    soft_wrap: true,
+                    autogrow: true,
+                    enter_settings: EnterSettings {
+                        enter: EnterAction::InsertNewLineIfMultiLine,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ctx,
+            );
+            editor.set_placeholder_text("Description (optional)", ctx);
+            editor
+        });
+        ctx.subscribe_to_view(&summary, |me, editor, event, ctx| match event {
+            EditorEvent::Edited(_) => {
+                me.commit_summary_len = editor.as_ref(ctx).buffer_text(ctx).trim().chars().count();
+                ctx.notify();
+            }
+            EditorEvent::Enter => ctx.focus(&me.commit_description_editor),
+            EditorEvent::CmdEnter => me.commit(ctx),
+            _ => {}
+        });
+        ctx.subscribe_to_view(&description, |me, _, event, ctx| {
+            if let EditorEvent::CmdEnter = event {
+                me.commit(ctx);
+            }
+        });
+        (summary, description)
+    }
+
+    fn uncommitted_file_path(&self, index: usize) -> Option<String> {
+        match &self.detail {
+            DetailState::Loaded(detail) if self.uncommitted_selected => {
+                detail.files.get(index).map(|f| f.path.clone())
+            }
+            _ => None,
+        }
+    }
+
+    fn commit(&mut self, ctx: &mut ViewContext<Self>) {
+        let summary = self
+            .commit_summary_editor
+            .as_ref(ctx)
+            .buffer_text(ctx)
+            .trim()
+            .to_string();
+        let description = self
+            .commit_description_editor
+            .as_ref(ctx)
+            .buffer_text(ctx)
+            .trim_end()
+            .to_string();
+        let has_staged =
+            matches!(&self.detail, DetailState::Loaded(d) if d.files.iter().any(|f| f.staged));
+        if summary.is_empty() || !has_staged {
+            return;
+        }
+        self.run_op(
+            GitWriteOp::Commit {
+                summary,
+                description,
+            },
+            ctx,
+        );
+    }
+
     fn rebuild_detail_mouse_states(&mut self, files: &[ChangedFile]) {
+        self.staging_mouse_states.rows = (0..files.len()).map(|_| Default::default()).collect();
         self.detail_file_mouse_states = Arc::new(
             (0..files.len())
                 .map(|_| MouseStateHandle::default())
@@ -2118,6 +2249,27 @@ impl GitGraphView {
             }
             DetailState::Error(err) => {
                 render_message(format!("Failed to load details: {err}"), appearance)
+            }
+            DetailState::Loaded(detail)
+                if self.uncommitted_selected && FeatureFlag::GitGraphWrite.is_enabled() =>
+            {
+                super::staging::StagingPanel {
+                    files: &detail.files,
+                    states: &self.staging_mouse_states,
+                    summary_input: super::staging::text_input(
+                        self.commit_summary_editor.clone(),
+                        None,
+                        appearance,
+                    ),
+                    description_input: super::staging::text_input(
+                        self.commit_description_editor.clone(),
+                        Some(64.),
+                        appearance,
+                    ),
+                    summary_len: self.commit_summary_len,
+                    scroll_state: self.staging_scroll_state.clone(),
+                }
+                .render(appearance)
             }
             DetailState::Loaded(detail) => {
                 let commit = self.selected.and_then(|i| self.commits.get(i));
@@ -2756,6 +2908,7 @@ impl GitGraphView {
         #[cfg(not(target_family = "wasm"))]
         {
             self.op_running = true;
+            self.op_quiet = op.is_staging();
             self.op_error = None;
             ctx.notify();
             let expected = repo.clone();
@@ -2785,6 +2938,23 @@ impl GitGraphView {
                                 // Deleting a remote branch: fetch --prune so the dropped
                                 // remote-tracking ref disappears from the graph.
                                 GitWriteOp::DeleteRemoteBranch { .. } => view.refresh(ctx),
+                                GitWriteOp::StageFiles { .. }
+                                | GitWriteOp::StageAll
+                                | GitWriteOp::UnstageFiles { .. }
+                                | GitWriteOp::UnstageAll => {
+                                    view.refresh_uncommitted_detail(ctx);
+                                    ctx.notify();
+                                }
+                                GitWriteOp::Commit { .. } => {
+                                    for editor in [
+                                        view.commit_summary_editor.clone(),
+                                        view.commit_description_editor.clone(),
+                                    ] {
+                                        editor.update(ctx, |editor, ctx| editor.clear_buffer(ctx));
+                                    }
+                                    view.commit_summary_len = 0;
+                                    view.reload(LoadAnchor::Top, ctx);
+                                }
                                 // Everything else — including push, which updates (or
                                 // creates) the local remote-tracking ref — reloads so the
                                 // graph reflects the new ref positions.
@@ -4350,6 +4520,20 @@ impl TypedActionView for GitGraphView {
                 });
                 self.resolve_pending_select(ctx);
             }
+            GitGraphAction::StageFile(index) | GitGraphAction::UnstageFile(index) => {
+                if let Some(path) = self.uncommitted_file_path(*index) {
+                    let paths = vec![path];
+                    let op = if matches!(action, GitGraphAction::StageFile(_)) {
+                        GitWriteOp::StageFiles { paths }
+                    } else {
+                        GitWriteOp::UnstageFiles { paths }
+                    };
+                    self.run_op(op, ctx);
+                }
+            }
+            GitGraphAction::StageAll => self.run_op(GitWriteOp::StageAll, ctx),
+            GitGraphAction::UnstageAll => self.run_op(GitWriteOp::UnstageAll, ctx),
+            GitGraphAction::Commit => self.commit(ctx),
             GitGraphAction::SaveColumnWidths => {
                 let widths = ColumnWidths::read(&self.refs_column_state, &self.graph_column_state);
                 GitSettings::handle(ctx).update(ctx, |settings, ctx| {
@@ -4571,7 +4755,7 @@ impl View for GitGraphView {
         // Added as a non-positioned child so it's constrained to the Stack (i.e.
         // the panel) size and fills only the panel — a positioned overlay child
         // would instead be sized to the whole window and dim the entire app.
-        if self.op_running {
+        if self.op_running && !self.op_quiet {
             stack.add_child(self.render_working_overlay(appearance));
         }
 
