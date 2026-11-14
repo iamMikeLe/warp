@@ -4,9 +4,10 @@
 # features), signs it with this Mac's own certificate, and wraps it in a drag-to-Applications DMG.
 # For personal use: the app isn't notarized, so on another Mac it needs right-click > Open once.
 #
-# Usage: script/macos/personal_dmg [--name AppName] [output.dmg]
+# Usage: script/macos/personal_dmg [--name AppName] [--icon icon.png] [output.dmg]
 #   --name      the app's name in Finder, the Dock and the menu bar (default: WarpOss). Only the
 #               displayed name changes: settings stay in ~/.warp-oss.
+#   --icon      a square PNG (ideally 1024x1024) to use as the app icon
 #   output.dmg  default: ~/Desktop/<AppName>.dmg
 #
 # One-time setup beyond the normal build tools: cargo install --locked cargo-about@0.8.4
@@ -20,11 +21,16 @@ if ! command -v cargo-about > /dev/null; then
 fi
 
 APP_NAME="WarpOss"
+ICON_PNG=""
 DMG_PATH=""
 while (( $# )); do
   case "$1" in
     --name)
       APP_NAME="${2:?--name needs a value}"
+      shift 2
+      ;;
+    --icon)
+      ICON_PNG="${2:?--icon needs a PNG file}"
       shift 2
       ;;
     *)
@@ -38,6 +44,13 @@ if [[ ! "$APP_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9\ ._-]*$ ]]; then
   exit 1
 fi
 DMG_PATH="${DMG_PATH:-$HOME/Desktop/$APP_NAME.dmg}"
+if [[ -n "$ICON_PNG" ]]; then
+  if [[ ! -f "$ICON_PNG" ]]; then
+    echo "No such icon file: $ICON_PNG" >&2
+    exit 1
+  fi
+  ICON_PNG="$(cd "$(dirname "$ICON_PNG")" && pwd)/$(basename "$ICON_PNG")"
+fi
 
 cd "$(dirname "$0")/../.."
 
@@ -65,10 +78,24 @@ fi
 STAGE="$(mktemp -d)"
 STAGED_APP="$STAGE/$APP_NAME.app"
 cp -R "$APP" "$STAGED_APP"
+PLIST="$STAGED_APP/Contents/Info.plist"
 if [[ "$APP_NAME" != "WarpOss" ]]; then
-  plutil -replace CFBundleName -string "$APP_NAME" "$STAGED_APP/Contents/Info.plist"
-  plutil -replace CFBundleDisplayName -string "$APP_NAME" "$STAGED_APP/Contents/Info.plist"
-  # Editing Info.plist invalidates the signature; sign again the way script/bundle --selfsign
+  plutil -replace CFBundleName -string "$APP_NAME" "$PLIST"
+  plutil -replace CFBundleDisplayName -string "$APP_NAME" "$PLIST"
+fi
+if [[ -n "$ICON_PNG" ]]; then
+  ICONSET="$STAGE/AppIcon.iconset"
+  mkdir "$ICONSET"
+  for px in 16 32 128 256 512; do
+    sips -z "$px" "$px" "$ICON_PNG" --out "$ICONSET/icon_${px}x${px}.png" > /dev/null
+    sips -z $((px * 2)) $((px * 2)) "$ICON_PNG" --out "$ICONSET/icon_${px}x${px}@2x.png" > /dev/null
+  done
+  ICON_FILE="$(plutil -extract CFBundleIconFile raw "$PLIST")"
+  iconutil -c icns "$ICONSET" -o "$STAGED_APP/Contents/Resources/${ICON_FILE%.icns}.icns"
+  rm -r "$ICONSET"
+fi
+if [[ "$APP_NAME" != "WarpOss" || -n "$ICON_PNG" ]]; then
+  # Changing the bundle invalidates its signature; sign again the way script/bundle --selfsign
   # does when there's no Apple Development certificate.
   codesign --force --deep --options runtime --sign - \
     --entitlements script/Debug-Entitlements.plist "$STAGED_APP"
