@@ -23,6 +23,8 @@ pub struct HeaderRenderContext<'a> {
     pub draggable_state: DraggableState,
     /// Mouse state for the pane close button (owned by PaneHeader).
     pub close_button_mouse_state: MouseStateHandle,
+    /// Mouse state for the pane collapse button (owned by PaneHeader).
+    pub collapse_button_mouse_state: MouseStateHandle,
     /// Mouse state for the pane overflow button (owned by PaneHeader).
     pub overflow_button_mouse_state: MouseStateHandle,
     /// SavePosition ID for the overflow button (needed for overlay anchoring).

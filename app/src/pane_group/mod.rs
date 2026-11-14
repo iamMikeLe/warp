@@ -182,6 +182,9 @@ pub(crate) mod child_agent;
 pub(crate) use child_agent::materialization::{
     ChildPaneMaterialization, decide_child_pane_materialization,
 };
+pub mod collapse;
+use collapse::CollapsedPane;
+use warpui::elements::MouseStateHandle;
 pub mod focus_state;
 pub mod pane;
 pub mod tree;
@@ -221,6 +224,7 @@ pub use crate::code_review::CodeReviewPanelArg;
 /// Binding name for the action that toggles maximizing the active pane. Shared so
 /// the pane header menu item can surface the same shortcut the binding resolves to.
 pub const TOGGLE_MAXIMIZE_PANE_BINDING_NAME: &str = "pane_group:toggle_maximize_pane";
+pub const TOGGLE_COLLAPSE_PANE_BINDING_NAME: &str = "pane_group:toggle_collapse_pane";
 
 lazy_static! {
     // The value to use as the initial window bounds if we are unable to
@@ -306,6 +310,10 @@ pub enum PaneGroupAction {
     NavigateUp,
     NavigateDown,
     ToggleMaximizePane,
+    /// Collapse the focused pane to a strip, or expand it if it's collapsed.
+    ToggleCollapsePane,
+    /// Expand a collapsed pane and focus it (clicking its strip).
+    ExpandPane(PaneId),
     HandleFocusChange,
     FocusTerminalView(EntityId),
 }
@@ -476,6 +484,14 @@ pub fn init(app: &mut AppContext) {
         )
         .with_context_predicate(id!("PaneGroup") & !id!("PaneGroup_PaneDragging"))
         .with_custom_action(CustomAction::ToggleMaximizePane),
+        EditableBinding::new(
+            TOGGLE_COLLAPSE_PANE_BINDING_NAME,
+            "Toggle Collapse Active Pane",
+            PaneGroupAction::ToggleCollapsePane,
+        )
+        .with_context_predicate(
+            id!("PaneGroup") & !id!("PaneGroup_PaneMaximized") & !id!("PaneGroup_PaneDragging"),
+        ),
     ]);
 
     if ChannelState::channel() == Channel::Integration {
@@ -877,6 +893,9 @@ pub struct PaneGroup {
     user_default_shell_unsupported_banner_model_handle: ModelHandle<BannerState>,
     model_event_sender: Option<SyncSender<ModelEvent>>,
     panes: PaneData,
+    /// Panes shown as collapsed strips, with each strip's hover state. In memory only: a restored
+    /// session starts with every pane expanded.
+    collapsed_panes: HashMap<PaneId, MouseStateHandle>,
     /// Centralized focus state model. Panes subscribe to this to derive their split pane state.
     focus_state: ModelHandle<focus_state::PaneGroupFocusState>,
     pane_history: Vec<PaneId>,
@@ -1299,6 +1318,7 @@ impl PaneGroup {
                     ctx.emit(Event::TerminalViewStateChanged);
                     ctx.notify();
                 }
+                PaneViewEvent::ToggleCollapsed => self.toggle_collapse_pane(pane_id, ctx),
                 PaneViewEvent::PaneHeaderClicked => {
                     self.focus_pane_by_id(pane_id, ctx);
                     ctx.emit(Event::TerminalViewStateChanged);
@@ -3188,6 +3208,7 @@ impl PaneGroup {
             user_default_shell_unsupported_banner_model_handle,
             model_event_sender,
             panes: pane_data,
+            collapsed_panes: HashMap::new(),
             focus_state,
             pane_history,
             pane_contents,
@@ -5869,6 +5890,71 @@ impl PaneGroup {
     }
 
     /// Toggles whether or not the focused pane is maximized.
+    /// Collapses `pane_id` to a strip, or expands it if it's collapsed. A pane only collapses
+    /// while another pane in its split stays expanded; collapsing the focused pane moves focus to
+    /// the next expanded pane.
+    fn toggle_collapse_pane(&mut self, pane_id: PaneId, ctx: &mut ViewContext<Self>) {
+        if self.collapsed_panes.remove(&pane_id).is_some() {
+            ctx.notify();
+            return;
+        }
+        let collapsed = &self.collapsed_panes;
+        if !self
+            .panes
+            .has_expanded_sibling(pane_id, &|id| collapsed.contains_key(&id))
+        {
+            return;
+        }
+        self.collapsed_panes
+            .insert(pane_id, MouseStateHandle::default());
+        if self.focused_pane_id(ctx) == pane_id {
+            let next = self
+                .panes
+                .visible_pane_ids()
+                .into_iter()
+                .find(|id| !self.collapsed_panes.contains_key(id));
+            if let Some(next) = next {
+                self.focus_pane_by_id(next, ctx);
+            }
+        }
+        ctx.notify();
+    }
+
+    fn expand_pane(&mut self, pane_id: PaneId, ctx: &mut ViewContext<Self>) {
+        self.collapsed_panes.remove(&pane_id);
+        self.focus_pane_by_id(pane_id, ctx);
+        ctx.notify();
+    }
+
+    /// The collapsed panes still in the layout, with what their strips show.
+    fn collapsed_pane_strips(&self, app: &AppContext) -> HashMap<PaneId, CollapsedPane> {
+        self.collapsed_panes
+            .iter()
+            .filter(|(id, _)| self.panes.is_pane_in_tree(**id) && !self.panes.is_pane_hidden(id))
+            .map(|(id, mouse_state)| {
+                let title = self
+                    .pane_contents
+                    .get(id)
+                    .map(|pane| {
+                        pane.as_pane()
+                            .pane_configuration()
+                            .as_ref(app)
+                            .title()
+                            .to_string()
+                    })
+                    .filter(|title| !title.is_empty())
+                    .unwrap_or_else(|| "Pane".to_string());
+                (
+                    *id,
+                    CollapsedPane {
+                        title,
+                        mouse_state: mouse_state.clone(),
+                    },
+                )
+            })
+            .collect()
+    }
+
     fn toggle_maximize_pane(&mut self, ctx: &mut ViewContext<Self>) {
         if self.pane_count() > 1 {
             self.focus_state.update(ctx, |focus_state, ctx| {
@@ -7715,6 +7801,10 @@ impl PaneGroup {
         if !self.pane_contents.contains_key(&id) {
             return false;
         }
+        // Moving focus to a collapsed pane (keyboard navigation, a click on its strip) expands it.
+        if self.collapsed_panes.remove(&id).is_some() {
+            ctx.notify();
+        }
         // Saves the handle of a currently focused terminal pane before switching away from it.
         let maybe_origin_terminal_view =
             self.terminal_view_from_pane_id(self.focused_pane_id(ctx), ctx);
@@ -8261,6 +8351,11 @@ impl TypedActionView for PaneGroup {
             NavigateUp => self.navigate_pane_by_direction(Direction::Up, ctx),
             NavigateDown => self.navigate_pane_by_direction(Direction::Down, ctx),
             ToggleMaximizePane => self.toggle_maximize_pane(ctx),
+            ToggleCollapsePane => {
+                let focused = self.focused_pane_id(ctx);
+                self.toggle_collapse_pane(focused, ctx);
+            }
+            ExpandPane(pane_id) => self.expand_pane(*pane_id, ctx),
             Move {
                 id,
                 target_pane_id,
@@ -8339,16 +8434,20 @@ impl View for PaneGroup {
         let main_content = if self.is_focused_pane_maximized(app) {
             self.focused_pane_id(app).render(app)
         } else {
-            EventHandler::new(self.panes.render(appearance.theme(), app))
-                .on_mouse_dragged(move |ctx, _, position| {
-                    ctx.dispatch_typed_action(PaneGroupAction::ResizeMove(position));
-                    DispatchEventResult::StopPropagation
-                })
-                .on_left_mouse_up(move |ctx, _, _| {
-                    ctx.dispatch_typed_action(PaneGroupAction::EndResizing);
-                    DispatchEventResult::StopPropagation
-                })
-                .finish()
+            EventHandler::new(self.panes.render(
+                appearance.theme(),
+                &self.collapsed_pane_strips(app),
+                app,
+            ))
+            .on_mouse_dragged(move |ctx, _, position| {
+                ctx.dispatch_typed_action(PaneGroupAction::ResizeMove(position));
+                DispatchEventResult::StopPropagation
+            })
+            .on_left_mouse_up(move |ctx, _, _| {
+                ctx.dispatch_typed_action(PaneGroupAction::EndResizing);
+                DispatchEventResult::StopPropagation
+            })
+            .finish()
         };
         column.add_child(Shrinkable::new(1., main_content).finish());
 

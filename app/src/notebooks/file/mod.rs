@@ -1279,7 +1279,7 @@ impl BackingView for FileNotebookView {
                 None,
             ));
 
-            let button_count = show_close_button as u32 + ctx.has_overflow_items as u32;
+            let button_count = 2 * show_close_button as u32 + ctx.has_overflow_items as u32;
             let buttons_width = button_count as f32 * ICON_DIMENSIONS;
 
             let title_text = render_pane_header_title_text(

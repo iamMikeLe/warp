@@ -55,6 +55,18 @@ pub fn render_pane_close_button<A: ActionPayload, B: ActionPayload>(
     apply_size_constraint(button.finish(), button_size)
 }
 
+/// Renders the button that collapses the pane to a strip in its split.
+pub fn render_pane_collapse_button<A: ActionPayload, B: ActionPayload>(
+    appearance: &Appearance,
+    mouse_state: MouseStateHandle,
+    icon_color: Option<Fill>,
+    button_size: Option<f32>,
+) -> Box<dyn Element> {
+    let button = build_icon_button(appearance, Icon::Minus, mouse_state, icon_color)
+        .on_click(|ctx, _, _| ctx.dispatch_typed_action(PaneHeaderAction::<A, B>::ToggleCollapsed));
+    apply_size_constraint(button.finish(), button_size)
+}
+
 /// Renders the standard pane overflow menu button to dispatch the pane overflow menu action.
 pub fn render_pane_overflow_button<A: ActionPayload, B: ActionPayload>(
     appearance: &Appearance,
@@ -94,7 +106,14 @@ pub fn render_pane_header_buttons<A: ActionPayload, B: ActionPayload>(
         ));
     }
 
+    // Panes with a close button are in a split, where they can also collapse.
     if show_close_button {
+        row.add_child(render_pane_collapse_button::<A, B>(
+            appearance,
+            header_ctx.collapse_button_mouse_state.clone(),
+            icon_color,
+            button_size,
+        ));
         row.add_child(render_pane_close_button::<A, B>(
             appearance,
             header_ctx.close_button_mouse_state.clone(),

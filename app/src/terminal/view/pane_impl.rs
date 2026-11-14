@@ -475,7 +475,7 @@ impl TerminalView {
                 button_size,
             ),
         );
-        icon_button_count += show_close_button as u32
+        icon_button_count += 2 * show_close_button as u32
             + header_ctx.has_overflow_items as u32
             + has_sharing_element as u32;
 

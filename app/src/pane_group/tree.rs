@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::{fmt, iter, mem};
 
 use pathfinder_geometry::rect::RectF;
@@ -14,6 +14,7 @@ use warpui::elements::{
 use warpui::platform::Cursor;
 use warpui::{AppContext, EntityId, ViewContext};
 
+use super::collapse::{CollapsedPane, render_collapsed_pane};
 use super::{ActivationReason, PaneGroup, PaneId};
 use crate::app_state;
 use crate::pane_group::{DraggedBorder, PaneGroupAction, get_minimum_pane_size};
@@ -513,11 +514,37 @@ impl PaneData {
         self.len == 0
     }
 
-    pub fn render(&self, theme: &WarpTheme, app: &AppContext) -> Box<dyn Element> {
+    /// `collapsed` holds the panes drawn as collapsed strips; a lone pane is never collapsed.
+    pub fn render(
+        &self,
+        theme: &WarpTheme,
+        collapsed: &HashMap<PaneId, CollapsedPane>,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
         match &self.root {
             PaneNode::Leaf(pane) => pane.render(app),
-            PaneNode::Branch(node) => node.render(theme, &self.hidden_panes, app),
+            PaneNode::Branch(node) => node.render(theme, &self.hidden_panes, collapsed, app),
         }
+    }
+
+    /// Whether `pane_id` can collapse: some other pane in its split (or nested below it) has to
+    /// stay expanded to take the space.
+    pub fn has_expanded_sibling(
+        &self,
+        pane_id: PaneId,
+        is_collapsed: &dyn Fn(PaneId) -> bool,
+    ) -> bool {
+        self.root.parent_branch_of(pane_id).is_some_and(|branch| {
+            branch.nodes.iter().any(|(_, node)| match node {
+                PaneNode::Leaf(id) => {
+                    *id != pane_id && !is_collapsed(*id) && !self.is_pane_hidden(id)
+                }
+                PaneNode::Branch(_) => node
+                    .pane_ids()
+                    .iter()
+                    .any(|id| !is_collapsed(*id) && !self.is_pane_hidden(id)),
+            })
+        })
     }
 
     pub fn adjust_pane_size(
@@ -717,10 +744,29 @@ impl PaneNode {
         }
     }
 
+    /// The branch directly containing `pane_id` as a leaf.
+    fn parent_branch_of(&self, pane_id: PaneId) -> Option<&PaneBranch> {
+        let PaneNode::Branch(branch) = self else {
+            return None;
+        };
+        if branch
+            .nodes
+            .iter()
+            .any(|(_, node)| matches!(node, PaneNode::Leaf(id) if *id == pane_id))
+        {
+            return Some(branch);
+        }
+        branch
+            .nodes
+            .iter()
+            .find_map(|(_, node)| node.parent_branch_of(pane_id))
+    }
+
     fn render(
         &self,
         theme: &WarpTheme,
         hidden_panes: &Vec<HiddenPane>,
+        collapsed: &HashMap<PaneId, CollapsedPane>,
         app: &AppContext,
     ) -> Box<dyn Element> {
         match self {
@@ -736,7 +782,7 @@ impl PaneNode {
                     })
                     .finish()
             }
-            PaneNode::Branch(branch) => branch.render(theme, hidden_panes, app),
+            PaneNode::Branch(branch) => branch.render(theme, hidden_panes, collapsed, app),
         }
     }
 
@@ -1057,8 +1103,11 @@ impl PaneBranch {
         &self,
         theme: &WarpTheme,
         hidden_panes: &Vec<HiddenPane>,
+        collapsed: &HashMap<PaneId, CollapsedPane>,
         app: &AppContext,
     ) -> Box<dyn Element> {
+        let is_collapsed_leaf =
+            |node: &PaneNode| matches!(node, PaneNode::Leaf(id) if collapsed.contains_key(id));
         let mut parent = match self.axis {
             SplitDirection::Horizontal => Flex::row(),
             SplitDirection::Vertical => Flex::column(),
@@ -1071,7 +1120,7 @@ impl PaneBranch {
         // Collect divider positions to render them as positioned elements later.
         let mut divider_positions = Vec::new();
 
-        for (flex, node) in self.nodes.iter() {
+        for (index, (flex, node)) in self.nodes.iter().enumerate() {
             // Skip nodes that have no visible children, but preserve nodes with children
             // hidden for move operations as they serve as drop targets
             if !node.has_visible_children(hidden_panes)
@@ -1088,11 +1137,35 @@ impl PaneBranch {
                 }
             }
 
-            parent.add_child(
-                Shrinkable::new(flex_value, node.render(theme, hidden_panes, app)).finish(),
-            );
+            // A collapsed pane keeps its slot as a fixed-size strip; its flex is untouched, so
+            // expanding restores the previous size.
+            match node {
+                PaneNode::Leaf(id) if collapsed.contains_key(id) => {
+                    parent.add_child(render_collapsed_pane(
+                        *id,
+                        &collapsed[id],
+                        self.axis,
+                        index == 0,
+                        theme,
+                        app,
+                    ));
+                }
+                _ => parent.add_child(
+                    Shrinkable::new(flex_value, node.render(theme, hidden_panes, collapsed, app))
+                        .finish(),
+                ),
+            }
             if let Some(divider) = dividers.next() {
                 if matches!(node, PaneNode::Leaf(id) if pane_hidden_for_move(hidden_panes, id)) {
+                    continue;
+                }
+                // No resizing against a collapsed strip.
+                if is_collapsed_leaf(node)
+                    || self
+                        .nodes
+                        .get(index + 1)
+                        .is_some_and(|(_, next)| is_collapsed_leaf(next))
+                {
                     continue;
                 }
                 // Store a position index to render the actual divider at after we've rendered all pane content.

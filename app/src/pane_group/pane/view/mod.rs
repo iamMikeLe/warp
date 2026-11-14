@@ -54,6 +54,8 @@ pub fn init(app: &mut AppContext) {
 }
 
 pub enum PaneViewEvent {
+    /// The header's collapse button was clicked.
+    ToggleCollapsed,
     MovePaneWithinPaneGroup {
         target_id: PaneId,
         direction: Direction,
@@ -280,6 +282,7 @@ impl<P: BackingView> PaneView<P> {
     ) {
         match event {
             header::Event::PaneHeaderClicked => ctx.emit(PaneViewEvent::PaneHeaderClicked),
+            header::Event::ToggleCollapsed => ctx.emit(PaneViewEvent::ToggleCollapsed),
             header::Event::PaneHeaderOverflowMenuToggled(is_open) => {
                 self.child(ctx).update(ctx, |child, ctx| {
                     child.on_pane_header_overflow_menu_toggled(*is_open, ctx);
