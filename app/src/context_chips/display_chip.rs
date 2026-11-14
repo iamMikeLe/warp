@@ -27,6 +27,7 @@ use super::directory_fetcher::{
 use super::display_menu::{
     ChipMenuType, DisplayChipMenu, FixedFooter, GenericMenuItem, PromptDisplayMenuEvent,
 };
+use super::nested_folders::NestedFolderSource;
 use super::{
     ChipResult, ChipValue, ContextChipKind, agent_view_chip_color, github_pr_display_text_from_url,
     render_text_from_kind,
@@ -960,6 +961,16 @@ impl DisplayChip {
                     )
                 });
 
+                if let Some(session_context) = config.session_context.clone() {
+                    let source = NestedFolderSource {
+                        session_context,
+                        base_dir: dir_path.clone(),
+                    };
+                    menu_view.update(ctx, |menu, ctx| {
+                        menu.set_nested_folder_source(Some(source), ctx);
+                    });
+                }
+
                 // Subscribe to DirectoryFetcher events to update menu
                 ctx.subscribe_to_model(
                     &directory_fetcher,
@@ -1294,9 +1305,22 @@ impl DisplayChip {
 
         // If this is a working directory chip, update the DirectoryFetcher's session context
         if let DisplayChipKind::WorkingDirectory {
-            directory_fetcher, ..
+            directory_fetcher,
+            menu,
+            ..
         } = &self.display_chip_kind
         {
+            let base_dir = directory_fetcher
+                .as_ref(ctx)
+                .current_directory()
+                .to_string();
+            let source = session_context
+                .clone()
+                .map(|session_context| NestedFolderSource {
+                    session_context,
+                    base_dir,
+                });
+            menu.update(ctx, |menu, ctx| menu.set_nested_folder_source(source, ctx));
             directory_fetcher.update(ctx, |fetcher, model_ctx| {
                 fetcher.update_session_context(session_context, model_ctx);
             });
