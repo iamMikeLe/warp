@@ -76,8 +76,9 @@ I picked it up from there. My work on top of it:
   they came from, with the coding agents working in each).
 - **`ui-tweaks`**: improvements unrelated to git, based directly on upstream Warp: alternating
   terminal block backgrounds, easier pane resizing, colored file icons, and rainbow indent.
-- **`pane-collapse`**: collapse a split pane to a thin strip (or bar) without closing it, based
-  directly on upstream Warp.
+- **`pane-layout`**: split-pane tools, based directly on upstream Warp: collapse a pane to a thin
+  strip without closing it, open files to the left so the terminal stays on the right, and a
+  button to open a terminal in the current tab.
 - **`daily`**: everything combined; the build I use day to day.
 
 Rules for working on this fork (for me and for any coding agent working in it):
