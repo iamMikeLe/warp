@@ -65,13 +65,36 @@ use crate::code::editor::{add_color, remove_color};
 use crate::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions};
 use crate::features::FeatureFlag;
 use crate::menu::{Menu, MenuItem, MenuItemFields};
+use crate::report_if_error;
 use crate::settings::{GitSettings, GitSettingsChangedEvent};
 use crate::ui_components::buttons::icon_button;
 use crate::ui_components::item_highlight::ItemHighlightState;
 use crate::view_components::dropdown::{Dropdown, DropdownAction, DropdownEvent};
+use settings::Setting as _;
 
 /// Number of commits loaded per page.
 const COMMIT_PAGE_SIZE: usize = 200;
+/// How many extra pages a jump to an unloaded commit (e.g. a parent chip) may load before
+/// giving up: 50 x [`COMMIT_PAGE_SIZE`] = 10,000 commits.
+const MAX_PAGES_FOR_JUMP: usize = 50;
+
+/// A commit waiting to be selected once loading more history brings it in.
+#[derive(Debug)]
+struct PendingSelect {
+    hash: String,
+    pages_left: usize,
+}
+
+/// Hover states for one commit row: the row itself and its "+N" ref chip.
+#[derive(Clone, Default)]
+struct RowMouseStates {
+    row: MouseStateHandle,
+    overflow: MouseStateHandle,
+}
+
+fn row_mouse_states(count: usize) -> Arc<Vec<RowMouseStates>> {
+    Arc::new((0..count).map(|_| RowMouseStates::default()).collect())
+}
 /// The commit chip plus up to this many minus one parent chips (octopus merges beyond that are
 /// rare and stay reachable from the graph).
 const DETAIL_HASH_CHIPS: usize = 5;
@@ -106,10 +129,13 @@ pub(crate) fn init(app: &mut AppContext) {
 pub(crate) enum GitGraphAction {
     /// Select the Nth commit row in the list and load its detail.
     SelectCommit(usize),
-    /// Select a loaded commit by its full hash and scroll it into view (no-op if not loaded).
+    /// Select a commit by its full hash and scroll it into view, loading more history first
+    /// when it isn't loaded yet.
     SelectCommitByHash(String),
     /// Select the synthetic "uncommitted changes" row and load its diff detail.
     SelectUncommitted,
+    /// Save the Branch / Tag and Graph column widths (dispatched when a header drag ends).
+    SaveColumnWidths,
     /// Switch to the Nth repository in the discovered list (dispatched by the
     /// top dropdown when there are multiple repos).
     SelectRepository(usize),
@@ -367,7 +393,12 @@ pub(crate) struct GitGraphView {
     state: LoadState,
     /// Per-row mouse state handles (used by [`Hoverable`] for click/hover),
     /// same length as `commits`.
-    row_mouse_states: Arc<Vec<MouseStateHandle>>,
+    row_mouse_states: Arc<Vec<RowMouseStates>>,
+    /// Whether avatars load from Gravatar ([`GitSettings::git_graph_gravatar`]).
+    gravatar: bool,
+    /// A commit to select once it's loaded: set when jumping to a parent beyond the loaded
+    /// history, cleared when it's found, history runs out, or the list reloads.
+    pending_select: Option<PendingSelect>,
     /// Index of the currently selected row.
     selected: Option<usize>,
     /// Detail of the selected commit.
@@ -614,6 +645,10 @@ impl GitGraphView {
                 GitSettingsChangedEvent::ShowGitGraphStashes { .. } => {
                     me.reload(LoadAnchor::Preserve, ctx);
                 }
+                GitSettingsChangedEvent::GitGraphGravatar { .. } => {
+                    me.gravatar = *GitSettings::as_ref(ctx).git_graph_gravatar;
+                    ctx.notify();
+                }
                 _ => {}
             }
         });
@@ -691,6 +726,8 @@ impl GitGraphView {
             layout: Arc::new(empty_layout()),
             state: LoadState::NoRepo,
             row_mouse_states: Arc::new(Vec::new()),
+            gravatar: *GitSettings::as_ref(ctx).git_graph_gravatar,
+            pending_select: None,
             selected: None,
             detail: DetailState::None,
             list_state: UniformListState::new(),
@@ -703,8 +740,14 @@ impl GitGraphView {
             loading_shimmer: ShimmeringTextStateHandle::new(),
             op_shimmer: ShimmeringTextStateHandle::new(),
             detail_resizable_state: resizable_state_handle(220.0),
-            refs_column_state: resizable_state_handle(columns::DEFAULT_REFS_WIDTH),
-            graph_column_state: resizable_state_handle(columns::DEFAULT_GRAPH_WIDTH),
+            refs_column_state: resizable_state_handle(columns::saved_width(
+                *GitSettings::as_ref(ctx).git_graph_refs_column_width,
+                columns::DEFAULT_REFS_WIDTH,
+            )),
+            graph_column_state: resizable_state_handle(columns::saved_width(
+                *GitSettings::as_ref(ctx).git_graph_graph_column_width,
+                columns::DEFAULT_GRAPH_WIDTH,
+            )),
             detail_height_initialized: Arc::new(AtomicBool::new(false)),
             detail_close_mouse_state: MouseStateHandle::default(),
             detail_hash_mouse_states: (0..DETAIL_HASH_CHIPS)
@@ -1345,6 +1388,8 @@ impl GitGraphView {
     /// branch filter (called when the branch selection changes, or after the
     /// branch list finishes loading).
     fn load_commits(&mut self, anchor: LoadAnchor, ctx: &mut ViewContext<Self>) {
+        // A full reload drops the paged-in history, so an in-flight jump can't continue.
+        self.pending_select = None;
         // `Top` resets the selection and scrolls back to the newest commit;
         // `Preserve` (auto-refresh) keeps them and re-anchors by hash once the
         // new page lands.
@@ -1431,11 +1476,7 @@ impl GitGraphView {
                             view.has_more = has_more;
                             view.uncommitted_count = uncommitted;
                             view.layout = Arc::new(build_layout(&commits, uncommitted > 0));
-                            view.row_mouse_states = Arc::new(
-                                (0..view.layout.rows.len())
-                                    .map(|_| MouseStateHandle::default())
-                                    .collect(),
-                            );
+                            view.row_mouse_states = row_mouse_states(view.layout.rows.len());
                             view.commits = Arc::new(commits);
                             view.stashes = Arc::new(stashes);
                             view.state = LoadState::Loaded;
@@ -1503,6 +1544,27 @@ impl GitGraphView {
         }
     }
 
+    /// Selects [`Self::pending_select`] if it's loaded; otherwise loads the next page and tries
+    /// again when it arrives, up to [`MAX_PAGES_FOR_JUMP`] pages.
+    fn resolve_pending_select(&mut self, ctx: &mut ViewContext<Self>) {
+        let Some(pending) = self.pending_select.as_mut() else {
+            return;
+        };
+        if let Some(index) = self.commits.iter().position(|c| c.hash == pending.hash) {
+            self.pending_select = None;
+            self.select_commit(index, ctx);
+            self.list_state
+                .scroll_to(index + usize::from(self.uncommitted_count > 0));
+            return;
+        }
+        if !self.has_more || pending.pages_left == 0 {
+            self.pending_select = None;
+            return;
+        }
+        pending.pages_left -= 1;
+        self.load_more(ctx);
+    }
+
     /// Loads the next page of commits and appends it to the end of the list.
     fn load_more(&mut self, ctx: &mut ViewContext<Self>) {
         if self.loading_more || !self.has_more {
@@ -1563,17 +1625,14 @@ impl GitGraphView {
                             let combined = super::data::place_stashes(real, &view.stashes);
                             view.layout =
                                 Arc::new(build_layout(&combined, view.uncommitted_count > 0));
-                            view.row_mouse_states = Arc::new(
-                                (0..view.layout.rows.len())
-                                    .map(|_| MouseStateHandle::default())
-                                    .collect(),
-                            );
+                            view.row_mouse_states = row_mouse_states(view.layout.rows.len());
                             view.commits = Arc::new(combined);
                         }
                         Err(_) => {
                             view.has_more = false;
                         }
                     }
+                    view.resolve_pending_select(ctx);
                     ctx.notify();
                 },
             );
@@ -1850,6 +1909,7 @@ impl GitGraphView {
         let total = row_count + usize::from(has_more);
         let position_id = self.position_id.clone();
         let widths = ColumnWidths::read(&self.refs_column_state, &self.graph_column_state);
+        let gravatar = self.gravatar;
 
         let list = UniformList::new(self.list_state.clone(), total, move |range, app| {
             let appearance = Appearance::as_ref(app);
@@ -1862,7 +1922,10 @@ impl GitGraphView {
                         return Some(render_loading_more_row(appearance, shimmer.clone()));
                     }
                     let row = layout.rows.get(i)?;
-                    let state = mouse_states.get(i).cloned().unwrap_or_default();
+                    let RowMouseStates {
+                        row: state,
+                        overflow,
+                    } = mouse_states.get(i).cloned().unwrap_or_default();
                     // Synthetic "uncommitted changes" row (hollow node); not
                     // selectable yet, but highlights on hover.
                     if offset == 1 && i == 0 {
@@ -1916,6 +1979,8 @@ impl GitGraphView {
                         commit_idx,
                         &position_id,
                         widths,
+                        overflow,
+                        gravatar,
                         appearance,
                     );
                     let is_selected = selected == Some(commit_idx);
@@ -2074,6 +2139,7 @@ impl GitGraphView {
                     &self.detail_file_mouse_states,
                     &self.detail_dir_mouse_states,
                     &self.detail_collapsed_dirs,
+                    self.gravatar,
                     appearance,
                 )
             }
@@ -3673,6 +3739,7 @@ fn render_detail_body(
     file_mouse_states: &[MouseStateHandle],
     dir_mouse_states: &HashMap<String, MouseStateHandle>,
     collapsed_dirs: &HashSet<String>,
+    gravatar: bool,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
     let theme = appearance.theme();
@@ -3742,6 +3809,7 @@ fn render_detail_body(
                 &c.author_name,
                 &c.author_email,
                 22.,
+                gravatar,
                 author_row,
                 appearance,
             ))
@@ -3770,6 +3838,7 @@ fn render_detail_body(
                     &detail.committer_name,
                     &detail.committer_email,
                     16.,
+                    gravatar,
                     committer_row,
                     appearance,
                 ))
@@ -3950,19 +4019,20 @@ fn render_detail_body(
         .finish()
 }
 
-/// `child` with a locally drawn initials avatar to its left.
+/// `child` with the author's avatar to its left.
 fn with_avatar(
     name: &str,
     email: &str,
     diameter: f32,
+    gravatar: bool,
     child: Box<dyn Element>,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
     Flex::row()
         .with_cross_axis_alignment(CrossAxisAlignment::Center)
         .with_child(
-            Container::new(super::avatar::render_initials_avatar(
-                name, email, diameter, appearance,
+            Container::new(super::avatar::render_avatar(
+                name, email, diameter, gravatar, appearance,
             ))
             .with_margin_right(8.)
             .finish(),
@@ -4274,11 +4344,26 @@ impl TypedActionView for GitGraphView {
         match action {
             GitGraphAction::SelectCommit(index) => self.select_commit(*index, ctx),
             GitGraphAction::SelectCommitByHash(hash) => {
-                if let Some(index) = self.commits.iter().position(|c| &c.hash == hash) {
-                    self.select_commit(index, ctx);
-                    self.list_state
-                        .scroll_to(index + usize::from(self.uncommitted_count > 0));
-                }
+                self.pending_select = Some(PendingSelect {
+                    hash: hash.clone(),
+                    pages_left: MAX_PAGES_FOR_JUMP,
+                });
+                self.resolve_pending_select(ctx);
+            }
+            GitGraphAction::SaveColumnWidths => {
+                let widths = ColumnWidths::read(&self.refs_column_state, &self.graph_column_state);
+                GitSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(
+                        settings
+                            .git_graph_refs_column_width
+                            .set_value(widths.refs, ctx)
+                    );
+                    report_if_error!(
+                        settings
+                            .git_graph_graph_column_width
+                            .set_value(widths.graph, ctx)
+                    );
+                });
             }
             GitGraphAction::SelectUncommitted => self.select_uncommitted(ctx),
             GitGraphAction::SelectRepository(index) => self.select_repository(*index, ctx),

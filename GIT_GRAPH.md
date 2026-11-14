@@ -10,17 +10,20 @@ where many branches, worktrees, and stashes pile up quickly.
 
 ## Features
 
-- **Commit graph:** a lane-based DAG of the repository's history, with merge and fork
-  connectors and badges for HEAD, local and remote branches, tags, and stashes.
+- **Commit graph:** a lane-based DAG of the repository's history in resizable
+  **Branch / Tag | Graph | Commit message** columns (widths are remembered). Each node shows
+  the author's avatar: initials in a per-author color, or their Gravatar picture if you opt in.
+  Hovering a "+N" label lists the commit's other branches and tags.
 - **Commit details:** message, author, committer, timestamps, and changed files with
-  `+/-` counts; clicking a file opens a read-only diff.
+  `+/-` counts; clicking a file opens a read-only diff, and clicking a parent hash jumps to it
+  (loading older history if needed).
 - **Navigation:** a repository picker for folders with several repos, a branch filter,
   paging with "load more", and auto-refresh when the repository changes.
 - **Git operations (right-click):** checkout, create/rename/delete branches and tags,
   merge, rebase, reset (soft/mixed/hard), cherry-pick, revert, drop, push/pull, stash
   apply/pop/drop, and archive. Every mutating action asks for confirmation first.
-- **Settings → Git:** show or hide the panel and stashes, and set how deep to scan for
-  repositories.
+- **Settings → Git:** show or hide the panel and stashes, opt in to Gravatar pictures, and set
+  how deep to scan for repositories. The toggles are also in the Command Palette.
 
 ## Credits and what I've added
 
@@ -39,7 +42,19 @@ I picked it up from there. My work on top of it:
   base commit and respect the branch filter instead of opening lanes that never close (one
   real-world repo needed 168 lanes before the fix), and the lane area is capped so commit
   text always stays visible. Added a "Show stashes" setting.
-- **Next:** a GitKraken-style column layout (Branch/Tag | Graph | Commit message).
+- **Rebuilt the commit list as a GitKraken-style column layout:** branch/tag labels in their own
+  column with a connector to the commit, author avatars as graph nodes, per-lane row tints, and a
+  redesigned commit-details panel (hash and parent chips, file-type icons, a folder tree with
+  indent guides).
+
+## Branches
+
+- **`git-graph`** (this one): the Git Graph only, kept ready to propose upstream.
+- **`worktrees`**: a Worktrees panel built on top of the Git Graph (worktrees under the branches
+  they came from, with the coding agents working in each).
+- **`ui-tweaks`**: improvements unrelated to git, based directly on upstream Warp: alternating
+  terminal block backgrounds, easier pane resizing, colored file icons, and rainbow indent.
+- **`daily`**: everything combined; the build I use day to day.
 
 ## Building and running (macOS)
 

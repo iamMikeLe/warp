@@ -5,18 +5,21 @@
 //! column for all rows. The message column takes the remaining width.
 
 use pathfinder_color::ColorU;
+use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::Icon;
 use warp_core::ui::theme::color::internal_colors;
 use warpui::elements::{
-    Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, DragBarSide, Element,
-    Empty, Expanded, Fill, Flex, Highlight, Hoverable, MainAxisSize, MouseStateHandle,
-    ParentElement, Radius, Resizable, ResizableStateHandle, ScrollbarWidth, Shrinkable, Text,
+    Border, ChildAnchor, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, DragBarSide,
+    Element, Empty, Expanded, Fill, Flex, Highlight, Hoverable, MainAxisSize, MouseStateHandle,
+    OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Radius, Resizable,
+    ResizableStateHandle, ScrollbarWidth, Shrinkable, Stack, Text,
 };
 use warpui::text_layout::ClipConfig;
 
+use super::avatar::render_avatar;
 use super::data::{CommitNode, RefKind, RefLabel};
 use super::layout::GraphRow;
-use super::row_canvas::{GitGraphRowCanvas, lane_color};
+use super::row_canvas::{GitGraphRowCanvas, NODE_AVATAR_DIAMETER, lane_color};
 use super::view::{GitGraphAction, ref_menu_kind};
 use crate::appearance::Appearance;
 
@@ -58,6 +61,15 @@ impl ColumnWidths {
     }
 }
 
+/// A saved column width, or `default` if it's unusable (e.g. a corrupted value).
+pub(super) fn saved_width(saved: f32, default: f32) -> f32 {
+    if saved.is_finite() && saved >= MIN_GRAPH_WIDTH.min(MIN_REFS_WIDTH) {
+        saved
+    } else {
+        default
+    }
+}
+
 /// The ref shown in a row's Branch / Tag cell, plus how many others the row has.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct PrimaryRef<'a> {
@@ -66,8 +78,20 @@ pub(super) struct PrimaryRef<'a> {
     /// (`main` + `origin/main`): drawn as a second icon on the same label instead
     /// of counting toward the overflow.
     pub tracked_remote: Option<&'a RefLabel>,
-    /// Refs not shown in the cell (they're listed in the commit details).
+    /// Refs not shown in the cell (listed when hovering the "+N" chip, and in the commit details).
     pub hidden: usize,
+}
+
+impl PrimaryRef<'_> {
+    /// The refs counted in [`Self::hidden`], in git's order.
+    pub(super) fn hidden_refs<'r>(&self, refs: &'r [RefLabel]) -> Vec<&'r RefLabel> {
+        refs.iter()
+            .filter(|r| {
+                !std::ptr::eq(*r, self.label)
+                    && !self.tracked_remote.is_some_and(|t| std::ptr::eq(*r, t))
+            })
+            .collect()
+    }
 }
 
 fn ref_priority(kind: RefKind) -> u8 {
@@ -154,6 +178,7 @@ pub(super) fn render_column_header(
         .with_dragbar_side(DragBarSide::Right)
         .with_dragbar_hover_color(hover)
         .on_resize(|ctx, _| ctx.notify())
+        .on_end_resizing(|ctx, _| ctx.dispatch_typed_action(GitGraphAction::SaveColumnWidths))
         .with_bounds_callback(Box::new(move |window_size| {
             (min, (window_size.x() * 0.5).max(min))
         }))
@@ -265,13 +290,30 @@ fn render_ref_label(
         .finish()
 }
 
-fn render_overflow_chip(hidden: usize, appearance: &Appearance) -> Box<dyn Element> {
+/// The "+N" chip; hovering it lists the hidden refs as pills in a card below it.
+fn render_overflow_chip(
+    hidden: Vec<&RefLabel>,
+    color: ColorU,
+    mouse_state: MouseStateHandle,
+    appearance: &Appearance,
+) -> Box<dyn Element> {
     let theme = appearance.theme();
     let dim = theme.sub_text_color(theme.background());
-    Container::new(
+    let count = hidden.len();
+    let pills: Vec<Box<dyn Element>> = hidden
+        .iter()
+        .map(|label| {
+            Container::new(ref_pill(label, false, color, appearance))
+                .with_padding_bottom(3.)
+                .finish()
+        })
+        .collect();
+    let card_background = theme.surface_2();
+    let card_border = theme.outline();
+    let chip = Container::new(
         Container::new(
             Text::new_inline(
-                format!("+{hidden}"),
+                format!("+{count}"),
                 appearance.ui_font_family(),
                 appearance.ui_font_size() - 1.,
             )
@@ -288,6 +330,30 @@ fn render_overflow_chip(hidden: usize, appearance: &Appearance) -> Box<dyn Eleme
         .finish(),
     )
     .with_padding_left(3.)
+    .finish();
+    Hoverable::new(mouse_state, move |state| {
+        if !state.is_hovered() {
+            return chip;
+        }
+        let card = Container::new(Flex::column().with_children(pills).finish())
+            .with_background(card_background)
+            .with_border(Border::all(1.).with_border_fill(card_border))
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.)))
+            .with_uniform_padding(6.)
+            .with_padding_bottom(3.)
+            .finish();
+        let mut stack = Stack::new().with_child(chip);
+        stack.add_positioned_overlay_child(
+            card,
+            OffsetPositioning::offset_from_parent(
+                vec2f(0., 2.),
+                ParentOffsetBounds::WindowByPosition,
+                ParentAnchor::BottomLeft,
+                ChildAnchor::TopLeft,
+            ),
+        );
+        stack.finish()
+    })
     .finish()
 }
 
@@ -309,6 +375,7 @@ fn render_refs_cell(
     index: usize,
     position_id: &str,
     width: f32,
+    overflow_state: MouseStateHandle,
     appearance: &Appearance,
 ) -> (Box<dyn Element>, Option<ColorU>) {
     let Some(primary) = primary_ref(&commit.refs) else {
@@ -332,7 +399,12 @@ fn render_refs_cell(
             .finish(),
         );
     if primary.hidden > 0 {
-        row = row.with_child(render_overflow_chip(primary.hidden, appearance));
+        row = row.with_child(render_overflow_chip(
+            primary.hidden_refs(&commit.refs),
+            color,
+            overflow_state,
+            appearance,
+        ));
     }
     row = row
         .with_child(connector_line(color, Some(MIN_CONNECTOR)))
@@ -392,21 +464,38 @@ pub(super) fn render_commit_row(
     index: usize,
     position_id: &str,
     widths: ColumnWidths,
+    overflow_state: MouseStateHandle,
+    gravatar: bool,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
     let color = lane_color(row.node_color);
-    let (refs_cell, connector_color) =
-        render_refs_cell(commit, color, index, position_id, widths.refs, appearance);
+    let (refs_cell, connector_color) = render_refs_cell(
+        commit,
+        color,
+        index,
+        position_id,
+        widths.refs,
+        overflow_state,
+        appearance,
+    );
+    let mut canvas = GitGraphRowCanvas::new(row.clone(), lane_count, false)
+        .with_width(widths.graph)
+        .with_ref_connector(connector_color);
+    // Stashes keep the plain dot: their "author" is just whoever stashed.
+    if !super::data::is_stash_node(commit) {
+        canvas = canvas.with_node_element(render_avatar(
+            &commit.author_name,
+            &commit.author_email,
+            NODE_AVATAR_DIAMETER,
+            gravatar,
+            appearance,
+        ));
+    }
     let cells = Flex::row()
         .with_main_axis_size(MainAxisSize::Max)
         .with_cross_axis_alignment(CrossAxisAlignment::Center)
         .with_child(refs_cell)
-        .with_child(
-            GitGraphRowCanvas::new(row.clone(), lane_count, false)
-                .with_width(widths.graph)
-                .with_ref_connector(connector_color)
-                .finish(),
-        )
+        .with_child(canvas.finish())
         .with_child(
             Expanded::new(
                 1.0,

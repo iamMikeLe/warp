@@ -136,7 +136,39 @@ fn commit_row_lays_out_with_refs_and_body() {
             0,
             "pos",
             widths,
+            MouseStateHandle::default(),
+            false,
             appearance,
         )
     });
+}
+
+#[test]
+fn hidden_refs_skip_the_shown_label_and_its_remote() {
+    let refs = vec![
+        RefLabel {
+            kind: RefKind::Tag,
+            name: "v1".into(),
+        },
+        RefLabel {
+            kind: RefKind::LocalBranch,
+            name: "main".into(),
+        },
+        RefLabel {
+            kind: RefKind::RemoteBranch,
+            name: "origin/main".into(),
+        },
+        RefLabel {
+            kind: RefKind::RemoteBranch,
+            name: "upstream/dev".into(),
+        },
+    ];
+    let primary = primary_ref(&refs).unwrap();
+    let hidden: Vec<&str> = primary
+        .hidden_refs(&refs)
+        .iter()
+        .map(|r| r.name.as_str())
+        .collect();
+    assert_eq!(hidden, ["v1", "upstream/dev"]);
+    assert_eq!(hidden.len(), primary.hidden);
 }

@@ -181,6 +181,7 @@ fn detail_elements_lay_out() {
                 &commit.author_name,
                 &commit.author_email,
                 22.,
+                true,
                 Empty::new().finish(),
                 appearance,
             ))

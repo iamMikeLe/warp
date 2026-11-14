@@ -550,6 +550,9 @@ pub mod flags {
         "Match_Notebook_Font_Size_To_Terminal_Font_Size";
     pub const QUIT_WARNING_MODAL: &str = "Quit_Warning_Modal";
     pub const BLOCK_DIVIDERS_CONTEXT_FLAG: &str = "Block_Dividers_Enabled";
+    pub const SHOW_GIT_GRAPH_CONTEXT_FLAG: &str = "Show_Git_Graph_Enabled";
+    pub const GIT_GRAPH_STASHES_CONTEXT_FLAG: &str = "Git_Graph_Stashes_Enabled";
+    pub const GIT_GRAPH_GRAVATAR_CONTEXT_FLAG: &str = "Git_Graph_Gravatar_Enabled";
 
     pub const LOG_OUT_WARNING_MODAL: &str = "Log_Out_Warning_Modal";
     pub const SMART_SELECT_FLAG: &str = "Smart_Select_Enabled";
@@ -697,6 +700,7 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
     code_indexing_page::init_actions_from_parent_view(app, context, builder);
     code_editor_review_page::init_actions_from_parent_view(app, context, builder);
     warp_drive_page::init_actions_from_parent_view(app, context, builder);
+    git_page::init_actions_from_parent_view(app, context, builder);
 
     if ChannelState::enable_debug_features() || cfg!(windows) {
         ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
@@ -1006,6 +1010,7 @@ pub enum SettingsAction {
     EditorAndCodeReview(EditorAndCodeReviewPageAction),
     WarpDrive(warp_drive_page::WarpDriveSettingsPageAction),
     WarpifyPageToggle(WarpifyPageAction),
+    Git(git_page::GitSettingsPageAction),
     Tab,
     Split(Direction),
     ToggleMaximizePane,
@@ -2752,6 +2757,15 @@ impl TypedActionView for SettingsView {
                 {
                     view.update(ctx, |view, ctx| {
                         view.handle_action(main_page_action, ctx);
+                    })
+                }
+            }
+            SettingsAction::Git(git_action) => {
+                if let Some(page) = self.settings_page(SettingsSection::Git)
+                    && let SettingsPageViewHandle::Git(view) = &page.view_handle
+                {
+                    view.update(ctx, |view, ctx| {
+                        view.handle_action(git_action, ctx);
                     })
                 }
             }

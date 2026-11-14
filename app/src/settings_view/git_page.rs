@@ -3,7 +3,9 @@
 //! to `widgets` as a new [`SettingsWidget`], with no change to the page structure.
 
 use settings::{Setting as _, ToggleableSetting as _};
+use warpui::Action;
 use warpui::elements::{Element, Flex};
+use warpui::keymap::ContextPredicate;
 use warpui::ui_components::components::UiComponent;
 use warpui::ui_components::switch::SwitchStateHandle;
 use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
@@ -12,8 +14,12 @@ use super::settings_page::{
     MatchData, PageType, SettingsPageEvent, SettingsPageMeta, SettingsPageViewHandle,
     SettingsWidget, add_setting, render_body_item, render_dropdown_item,
 };
-use super::{LocalOnlyIconState, SettingsSection, ToggleState};
+use super::{
+    LocalOnlyIconState, SettingsAction, SettingsSection, ToggleSettingActionPair, ToggleState,
+    flags,
+};
 use crate::appearance::Appearance;
+use crate::features::FeatureFlag;
 use crate::report_if_error;
 use crate::settings::{GitSettings, GitSettingsChangedEvent};
 use crate::view_components::{Dropdown, DropdownItem};
@@ -36,8 +42,49 @@ pub enum GitSettingsPageAction {
     ToggleShowGitGraph,
     /// Toggle whether stashes are shown in the Git Graph.
     ToggleShowStashes,
+    /// Toggle loading author pictures from Gravatar.
+    ToggleGravatar,
     /// Set the repository scan depth.
     SetScanDepth(u32),
+}
+
+/// Command Palette entries for the Git toggles ("Show/Hide ..."), as AGENTS.md asks of every
+/// toggle setting.
+pub fn init_actions_from_parent_view<T: Action + Clone>(
+    app: &mut AppContext,
+    context: &ContextPredicate,
+    builder: fn(SettingsAction) -> T,
+) {
+    if !FeatureFlag::GitGraph.is_enabled() {
+        return;
+    }
+    ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
+        vec![
+            ToggleSettingActionPair::new(
+                "git graph panel",
+                builder(SettingsAction::Git(
+                    GitSettingsPageAction::ToggleShowGitGraph,
+                )),
+                context,
+                flags::SHOW_GIT_GRAPH_CONTEXT_FLAG,
+            ),
+            ToggleSettingActionPair::new(
+                "stashes in git graph",
+                builder(SettingsAction::Git(
+                    GitSettingsPageAction::ToggleShowStashes,
+                )),
+                context,
+                flags::GIT_GRAPH_STASHES_CONTEXT_FLAG,
+            ),
+            ToggleSettingActionPair::new(
+                "gravatar pictures in git graph",
+                builder(SettingsAction::Git(GitSettingsPageAction::ToggleGravatar)),
+                context,
+                flags::GIT_GRAPH_GRAVATAR_CONTEXT_FLAG,
+            ),
+        ],
+        app,
+    );
 }
 
 pub struct GitSettingsPageView {
@@ -62,6 +109,7 @@ impl GitSettingsPageView {
         let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> = vec![
             Box::new(ShowGitGraphToggleWidget::default()),
             Box::new(ShowStashesToggleWidget::default()),
+            Box::new(GravatarToggleWidget::default()),
             Box::new(ScanDepthWidget::default()),
         ];
         Self {
@@ -126,6 +174,12 @@ impl TypedActionView for GitSettingsPageView {
             GitSettingsPageAction::ToggleShowStashes => {
                 GitSettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(settings.show_git_graph_stashes.toggle_and_save_value(ctx));
+                });
+                ctx.notify();
+            }
+            GitSettingsPageAction::ToggleGravatar => {
+                GitSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings.git_graph_gravatar.toggle_and_save_value(ctx));
                 });
                 ctx.notify();
             }
@@ -247,6 +301,50 @@ impl SettingsWidget for ShowStashesToggleWidget {
             Some(
                 "Shows each stash above the commit it was made on. Stashes made on branches \
                  hidden by the branch filter are not shown."
+                    .into(),
+            ),
+        )
+    }
+}
+
+/// Whether author avatars load from Gravatar.
+#[derive(Default)]
+struct GravatarToggleWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for GravatarToggleWidget {
+    type View = GitSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "git graph gravatar avatar profile picture author photo"
+    }
+
+    fn render(
+        &self,
+        _view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        render_body_item::<GitSettingsPageAction>(
+            "Load author pictures from Gravatar".into(),
+            None,
+            LocalOnlyIconState::Hidden,
+            ToggleState::Enabled,
+            appearance,
+            appearance
+                .ui_builder()
+                .switch(self.switch_state.clone())
+                .check(*GitSettings::as_ref(app).git_graph_gravatar)
+                .build()
+                .on_click(move |ctx, _, _| {
+                    ctx.dispatch_typed_action(GitSettingsPageAction::ToggleGravatar);
+                })
+                .finish(),
+            Some(
+                "Shows authors' Gravatar pictures on graph nodes and in commit details. This \
+                 sends a hash of each visible author's email to gravatar.com. Authors without a \
+                 picture keep their initials."
                     .into(),
             ),
         )

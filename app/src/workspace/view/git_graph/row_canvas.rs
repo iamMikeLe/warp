@@ -16,7 +16,7 @@ use warpui::{AppContext, EventContext, LayoutContext, PaintContext, SizeConstrai
 use super::layout::GraphRow;
 
 /// Pixel width of a single lane.
-pub(crate) const LANE_WIDTH: f32 = 16.0;
+pub(crate) const LANE_WIDTH: f32 = 20.0;
 /// Row height (aligned with the text rows on the right; UniformList uses this as
 /// the uniform row height).
 pub(crate) const ROW_HEIGHT: f32 = 28.0;
@@ -24,6 +24,11 @@ pub(crate) const ROW_HEIGHT: f32 = 28.0;
 const LINE_THICKNESS: f32 = 2.0;
 /// Commit dot diameter.
 const DOT_DIAMETER: f32 = 10.0;
+/// A node showing an avatar: a ring in the lane color around it. One lane wide, so it never covers
+/// a neighboring lane's line.
+const NODE_RING_DIAMETER: f32 = LANE_WIDTH;
+/// Diameter of the avatar inside the ring.
+pub(crate) const NODE_AVATAR_DIAMETER: f32 = NODE_RING_DIAMETER - 2. * LINE_THICKNESS;
 /// The lane area never takes more than this share of the row, so the hash, refs,
 /// and subject always stay visible however many lanes the loaded history needs.
 /// Lanes past the cap are clipped.
@@ -101,6 +106,8 @@ pub(crate) struct GitGraphRowCanvas {
     /// edge of the lane area to the node, continuing the connector drawn in the
     /// Branch / Tag column.
     ref_connector: Option<ColorU>,
+    /// Drawn in place of the dot (the author's avatar), inside a ring in the lane color.
+    node_element: Option<Box<dyn Element>>,
     origin: Option<Point>,
     size: Option<Vector2F>,
 }
@@ -113,6 +120,7 @@ impl GitGraphRowCanvas {
             hollow,
             fixed_width: None,
             ref_connector: None,
+            node_element: None,
             origin: None,
             size: None,
         }
@@ -127,6 +135,12 @@ impl GitGraphRowCanvas {
     /// Draws a connector from the left edge to the node (see [`Self::ref_connector`]).
     pub(crate) fn with_ref_connector(mut self, color: Option<ColorU>) -> Self {
         self.ref_connector = color;
+        self
+    }
+
+    /// Draws `element` (sized [`NODE_AVATAR_DIAMETER`] square) in place of the commit dot.
+    pub(crate) fn with_node_element(mut self, element: Box<dyn Element>) -> Self {
+        self.node_element = Some(element);
         self
     }
 
@@ -177,9 +191,16 @@ impl Element for GitGraphRowCanvas {
     fn layout(
         &mut self,
         constraint: SizeConstraint,
-        _ctx: &mut LayoutContext,
-        _app: &AppContext,
+        ctx: &mut LayoutContext,
+        app: &AppContext,
     ) -> Vector2F {
+        if let Some(element) = self.node_element.as_mut() {
+            element.layout(
+                SizeConstraint::strict(vec2f(NODE_AVATAR_DIAMETER, NODE_AVATAR_DIAMETER)),
+                ctx,
+                app,
+            );
+        }
         // Every row gets the same constraint (the list width), so the cap is the
         // same on every row and the lane columns stay aligned.
         let available = constraint.max.x();
@@ -194,9 +215,13 @@ impl Element for GitGraphRowCanvas {
         size
     }
 
-    fn after_layout(&mut self, _ctx: &mut warpui::AfterLayoutContext, _app: &AppContext) {}
+    fn after_layout(&mut self, ctx: &mut warpui::AfterLayoutContext, app: &AppContext) {
+        if let Some(element) = self.node_element.as_mut() {
+            element.after_layout(ctx, app);
+        }
+    }
 
-    fn paint(&mut self, origin: Vector2F, ctx: &mut PaintContext, _app: &AppContext) {
+    fn paint(&mut self, origin: Vector2F, ctx: &mut PaintContext, app: &AppContext) {
         self.origin = Some(Point::from_vec2f(origin, ctx.scene.z_index()));
 
         let top = origin.y();
@@ -282,6 +307,19 @@ impl Element for GitGraphRowCanvas {
             return;
         }
         let color = lane_color(self.row.node_color);
+        if let Some(element) = self.node_element.as_mut() {
+            let ring = NODE_RING_DIAMETER / 2.0;
+            ctx.scene
+                .draw_rect_with_hit_recording(RectF::new(
+                    vec2f(node_x - ring, mid - ring),
+                    vec2f(NODE_RING_DIAMETER, NODE_RING_DIAMETER),
+                ))
+                .with_corner_radius(CornerRadius::with_all(Radius::Pixels(ring)))
+                .with_background(color);
+            let inner = NODE_AVATAR_DIAMETER / 2.0;
+            element.paint(vec2f(node_x - inner, mid - inner), ctx, app);
+            return;
+        }
         let dot = ctx.scene.draw_rect_with_hit_recording(RectF::new(
             vec2f(node_x - radius, mid - radius),
             vec2f(DOT_DIAMETER, DOT_DIAMETER),

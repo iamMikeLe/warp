@@ -23520,6 +23520,17 @@ impl Workspace {
             context.set.insert(flags::BLOCK_DIVIDERS_CONTEXT_FLAG);
         }
 
+        let git_settings = crate::settings::GitSettings::as_ref(app);
+        if *git_settings.show_git_graph.value() {
+            context.set.insert(flags::SHOW_GIT_GRAPH_CONTEXT_FLAG);
+        }
+        if *git_settings.show_git_graph_stashes.value() {
+            context.set.insert(flags::GIT_GRAPH_STASHES_CONTEXT_FLAG);
+        }
+        if *git_settings.git_graph_gravatar.value() {
+            context.set.insert(flags::GIT_GRAPH_GRAVATAR_CONTEXT_FLAG);
+        }
+
         if *safe_mode_settings.safe_mode_enabled.value() {
             context.set.insert(flags::SAFE_MODE_FLAG);
         }
