@@ -146,6 +146,7 @@ fn test_end_to_end() {
             minimum_paragraph_height: Some(PARAGRAPH_MIN_HEIGHT),
             cursor_width: 1.,
             highlight_urls: true,
+            rainbow_indent: None,
             table_style: TableStyle {
                 border_color: ColorU::black(),
                 header_background: ColorU::black(),

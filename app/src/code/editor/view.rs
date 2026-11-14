@@ -28,7 +28,7 @@ use warp_editor::render::element::{
 };
 use warp_editor::render::model::{
     AutoScrollMode, BlockSpacing, CODE_EDITOR_HIDDEN_SECTION_EXPANSION_LINES, Decoration,
-    ExpansionType, LineCount, ParagraphStyles, RichTextStyles,
+    ExpansionType, LineCount, ParagraphStyles, RainbowIndent, RichTextStyles,
 };
 use warp_editor::search::{MATCH_FILL, SELECTED_MATCH_FILL, SearchEvent, Searcher};
 use warp_util::content_version::ContentVersion;
@@ -77,7 +77,12 @@ use crate::code_review::comments::{CommentId, CommentOrigin};
 use crate::editor::InteractionState;
 use crate::features::FeatureFlag;
 use crate::notebooks::editor::rich_text_styles;
-use crate::settings::{AppEditorSettings, CodeEditorLineNumberMode, FontSettings};
+use pathfinder_color::ColorU;
+
+use crate::settings::{
+    AppEditorSettings, CodeEditorLineNumberMode, CodeSettings, CodeSettingsChangedEvent,
+    FontSettings,
+};
 use crate::view_components::find::FindDirection;
 
 mod actions;
@@ -297,11 +302,18 @@ impl CodeEditorView {
     ) -> Self {
         let appearance_handle = Appearance::handle(ctx);
         let font_settings_handle = FontSettings::handle(ctx);
-        let initial_styles = code_text_styles(
+        let mut initial_styles = code_text_styles(
             appearance_handle.as_ref(ctx),
             font_settings_handle.as_ref(ctx),
             render_options.line_height_override,
         );
+        // The buffer's indent unit isn't known yet; it's applied once the language is set.
+        set_rainbow_indent(&mut initial_styles, IndentUnit::default(), ctx);
+        ctx.subscribe_to_model(&CodeSettings::handle(ctx), |me, _, event, ctx| {
+            if matches!(event, CodeSettingsChangedEvent::RainbowIndent { .. }) {
+                me.handle_appearance_or_font_change(ctx);
+            }
+        });
         ctx.subscribe_to_model(&appearance_handle, |me, _, _, ctx| {
             me.handle_appearance_or_font_change(ctx);
         });
@@ -1376,11 +1388,12 @@ impl CodeEditorView {
 
     /// Handles [`Appearance`] changes by updating the render model.
     fn handle_appearance_or_font_change(&mut self, ctx: &mut ViewContext<Self>) {
-        let new_styles = code_text_styles(
+        let mut new_styles = code_text_styles(
             Appearance::as_ref(ctx),
             FontSettings::as_ref(ctx),
             self.display_options.line_height_override,
         );
+        set_rainbow_indent(&mut new_styles, self.indent_unit(ctx), ctx);
         self.model.update(ctx, move |model, ctx| {
             model.handle_appearance_or_font_change(new_styles, ctx);
         });
@@ -1482,12 +1495,15 @@ impl CodeEditorView {
         self.model.update(ctx, |model, ctx| {
             model.set_language_with_local_path(path, ctx);
         });
+        // The language decides the indent unit the rainbow indent bands follow.
+        self.handle_appearance_or_font_change(ctx);
     }
 
     pub fn set_language_with_name(&mut self, name: &str, ctx: &mut ViewContext<Self>) {
         self.model.update(ctx, |model, ctx| {
             model.set_language_with_name(name, ctx);
         });
+        self.handle_appearance_or_font_change(ctx);
     }
 
     fn jump_to_line_column(&self, line: usize, column: Option<usize>, ctx: &mut ViewContext<Self>) {
@@ -2457,6 +2473,39 @@ impl View for CodeEditorView {
         }
         context
     }
+}
+
+/// Indent-rainbow colors (yellow, green, pink, cyan), faint enough to sit behind code.
+const RAINBOW_INDENT_COLORS: [(u8, u8, u8); 4] = [
+    (0xff, 0xff, 0x40),
+    (0x7f, 0xff, 0x7f),
+    (0xff, 0x7f, 0xff),
+    (0x4f, 0xec, 0xec),
+];
+
+/// Turns [`RichTextStyles::rainbow_indent`] on or off per [`CodeSettings::rainbow_indent`], with
+/// one band per `indent_unit`.
+fn set_rainbow_indent(styles: &mut RichTextStyles, indent_unit: IndentUnit, app: &AppContext) {
+    if !*CodeSettings::as_ref(app).rainbow_indent {
+        styles.rainbow_indent = None;
+        return;
+    }
+    let tab_columns = usize::from(styles.base_text.fixed_width_tab_size.unwrap_or(4));
+    let unit_columns = match indent_unit {
+        IndentUnit::Tab => tab_columns,
+        IndentUnit::Space(columns) => columns,
+    };
+    // Light backgrounds need a stronger tint for the bands to show.
+    let light = Appearance::as_ref(app).theme().inferred_color_scheme()
+        == warp_core::ui::theme::ColorScheme::DarkOnLight;
+    let alpha = if light { 0x2a } else { 0x12 };
+    styles.rainbow_indent = Some(RainbowIndent {
+        colors: RAINBOW_INDENT_COLORS
+            .iter()
+            .map(|&(r, g, b)| ColorU::new(r, g, b, alpha))
+            .collect(),
+        unit_columns: unit_columns.max(1),
+    });
 }
 
 pub fn code_text_styles(

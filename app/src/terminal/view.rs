@@ -4167,7 +4167,8 @@ impl TerminalView {
         ctx.subscribe_to_model(&block_list_settings_handle, |me, _, evt, ctx| match evt {
             BlockListSettingsChangedEvent::ShowJumpToBottomOfBlockButton { .. }
             | BlockListSettingsChangedEvent::SnackbarEnabled { .. }
-            | BlockListSettingsChangedEvent::ShowBlockDividers { .. } => ctx.notify(),
+            | BlockListSettingsChangedEvent::ShowBlockDividers { .. }
+            | BlockListSettingsChangedEvent::AlternateBlockBackgrounds { .. } => ctx.notify(),
             BlockListSettingsChangedEvent::PreserveInputFocusOnBlockSelection { .. } => {
                 // Fires for every terminal view, so use the focus-gated variant to avoid
                 // stealing focus from another pane or Settings.

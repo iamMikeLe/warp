@@ -1609,6 +1609,9 @@ impl View for LeftPanelView {
         };
         Resizable::new(self.resizable_state_handle.clone(), panel_content)
             .with_dragbar_side(drag_side)
+            .with_dragbar_hover_color(
+                internal_colors::fg_overlay_5(Appearance::as_ref(app).theme()).into(),
+            )
             .on_resize(move |ctx, _| {
                 ctx.notify();
             })

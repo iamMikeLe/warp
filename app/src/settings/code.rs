@@ -54,6 +54,28 @@ define_settings_group!(CodeSettings, settings: [
         toml_path: "code.editor.show_project_explorer",
         description: "Whether the project explorer is shown in the tools panel.",
     },
+    // Colored Material Icon Theme icons for files and folders, wherever files are listed.
+    colored_file_icons: ColoredFileIcons {
+        type: bool,
+        default: true,
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
+        private: false,
+        toml_path: "appearance.icons.colored_file_icons",
+        description: "Whether files and folders use colored, type-specific icons.",
+    },
+    // Faint colored bands behind each indentation level in code editors and diffs.
+    rainbow_indent: RainbowIndent {
+        type: bool,
+        default: true,
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        surface: settings::SettingSurfaces::GUI,
+        private: false,
+        toml_path: "code.editor.rainbow_indent",
+        description: "Whether code editors tint each indentation level in a different color.",
+    },
     // Controls whether global file search appears in the tools panel.
     show_global_search: ShowGlobalSearch {
         type: bool,

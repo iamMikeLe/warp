@@ -550,10 +550,14 @@ pub mod flags {
         "Match_Notebook_Font_Size_To_Terminal_Font_Size";
     pub const QUIT_WARNING_MODAL: &str = "Quit_Warning_Modal";
     pub const BLOCK_DIVIDERS_CONTEXT_FLAG: &str = "Block_Dividers_Enabled";
+    pub const ALTERNATE_BLOCK_BACKGROUNDS_CONTEXT_FLAG: &str =
+        "Alternate_Block_Backgrounds_Enabled";
+    pub const COLORED_FILE_ICONS_CONTEXT_FLAG: &str = "Colored_File_Icons_Enabled";
     pub const SHOW_GIT_GRAPH_CONTEXT_FLAG: &str = "Show_Git_Graph_Enabled";
     pub const SHOW_WORKTREES_CONTEXT_FLAG: &str = "Show_Worktrees_Enabled";
     pub const GIT_GRAPH_STASHES_CONTEXT_FLAG: &str = "Git_Graph_Stashes_Enabled";
     pub const GIT_GRAPH_GRAVATAR_CONTEXT_FLAG: &str = "Git_Graph_Gravatar_Enabled";
+    pub const RAINBOW_INDENT_CONTEXT_FLAG: &str = "Rainbow_Indent_Enabled";
 
     pub const LOG_OUT_WARNING_MODAL: &str = "Log_Out_Warning_Modal";
     pub const SMART_SELECT_FLAG: &str = "Smart_Select_Enabled";

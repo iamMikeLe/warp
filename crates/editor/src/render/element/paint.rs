@@ -143,6 +143,10 @@ impl<'a, 'b> RenderContext<'a, 'b> {
         style: &ParagraphStyles,
         state: &RenderState,
     ) {
+        if let Some(rainbow) = &state.styles().rainbow_indent {
+            // Under the text, so glyphs, selections, and decorations draw over it.
+            paragraph.draw_rainbow_indent(rainbow, self);
+        }
         let paint_style_override =
             self.paint_style_override(paragraph.start_char_offset..paragraph.end_char_offset());
         self.draw_text(

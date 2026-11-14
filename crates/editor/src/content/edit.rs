@@ -1135,6 +1135,7 @@ fn layout_text_block(
                 spacing,
                 rich_text_styles.minimum_paragraph_height,
             ));
+            record_leading_indent(&mut paragraphs, &active_line.text, &paragraph_styles);
             active_line.reset_for_newline();
         }
     }
@@ -1160,6 +1161,7 @@ fn layout_text_block(
             spacing,
             rich_text_styles.minimum_paragraph_height,
         ));
+        record_leading_indent(&mut paragraphs, &active_line.text, &paragraph_styles);
         false
     } else {
         true
@@ -1527,6 +1529,7 @@ fn layout_temporary_block(content: String, layout: &TextLayout) -> ParagraphBloc
             spacing,
             rich_text_styles.minimum_paragraph_height,
         ));
+        record_leading_indent(&mut paragraphs, &active_line.text, &styles);
         active_line.reset_for_newline();
     }
 
@@ -1642,5 +1645,12 @@ impl UrlDetectionState {
         // a URL. We can do this because UrlLocator reports a length and offset from the
         // current end position, which we can use as long as block_offset is correct.
         self.locator = UrlLocator::new();
+    }
+}
+
+/// Records the leading whitespace of the paragraph just laid out from `text` (for rainbow indent).
+fn record_leading_indent(paragraphs: &mut [Paragraph], text: &str, styles: &ParagraphStyles) {
+    if let Some(paragraph) = paragraphs.last_mut() {
+        paragraph.set_leading_indent(text, styles.fixed_width_tab_size);
     }
 }

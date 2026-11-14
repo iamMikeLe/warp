@@ -87,6 +87,7 @@ impl EditorAndCodeReviewPageView {
             Box::new(ProjectExplorerToggleWidget::default()),
             Box::new(GlobalSearchToggleWidget::default()),
             Box::new(ShowHiddenFilesToggleWidget::default()),
+            Box::new(RainbowIndentToggleWidget::default()),
             Box::new(FormatOnSaveToggleWidget::default()),
             Box::new(AutoSaveToggleWidget::default()),
         ]);
@@ -153,6 +154,7 @@ pub enum EditorAndCodeReviewPageAction {
     ToggleProjectExplorer,
     ToggleGlobalSearch,
     ToggleShowHiddenFiles,
+    ToggleRainbowIndent,
     ToggleFormatOnSave,
     ToggleAutoSave,
     SetCodeEditorLineNumberMode(CodeEditorLineNumberMode),
@@ -194,6 +196,12 @@ impl TypedActionView for EditorAndCodeReviewPageView {
             EditorAndCodeReviewPageAction::ToggleShowHiddenFiles => {
                 CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(settings.show_hidden_files.toggle_and_save_value(ctx));
+                });
+                ctx.notify();
+            }
+            EditorAndCodeReviewPageAction::ToggleRainbowIndent => {
+                CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings.rainbow_indent.toggle_and_save_value(ctx));
                 });
                 ctx.notify();
             }
@@ -333,6 +341,14 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
                 )),
                 context,
                 flags::SHOW_HIDDEN_FILES,
+            ),
+            ToggleSettingActionPair::new(
+                "rainbow indent",
+                builder(SettingsAction::EditorAndCodeReview(
+                    EditorAndCodeReviewPageAction::ToggleRainbowIndent,
+                )),
+                context,
+                flags::RAINBOW_INDENT_CONTEXT_FLAG,
             ),
         ],
         app,
@@ -610,6 +626,48 @@ impl SettingsWidget for ShowHiddenFilesToggleWidget {
                 .finish(),
             Some(
                 "Show dotfiles and hidden files (starting with .) in the project explorer.".into(),
+            ),
+        )
+    }
+}
+
+#[derive(Default)]
+struct RainbowIndentToggleWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for RainbowIndentToggleWidget {
+    type View = EditorAndCodeReviewPageView;
+
+    fn search_terms(&self) -> &str {
+        "rainbow indent indentation color colored levels guides code editor diff"
+    }
+
+    fn render(
+        &self,
+        _view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        render_body_item::<EditorAndCodeReviewPageAction>(
+            "Rainbow indent".into(),
+            None,
+            LocalOnlyIconState::Hidden,
+            ToggleState::Enabled,
+            appearance,
+            appearance
+                .ui_builder()
+                .switch(self.switch_state.clone())
+                .check(*CodeSettings::as_ref(app).rainbow_indent)
+                .build()
+                .on_click(move |ctx, _, _| {
+                    ctx.dispatch_typed_action(EditorAndCodeReviewPageAction::ToggleRainbowIndent);
+                })
+                .finish(),
+            Some(
+                "Tints each indentation level of code in a different faint color, in the editor \
+                 and in diffs."
+                    .into(),
             ),
         )
     }

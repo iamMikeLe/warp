@@ -120,6 +120,7 @@ pub enum SaveOutcome {
 pub mod file_tree;
 pub mod footer;
 mod icon;
+pub mod material_icons;
 
 pub mod active_file;
 pub mod opened_files;
@@ -130,6 +131,7 @@ pub use icon::icon_from_file_path;
 pub mod view;
 
 pub fn init(app: &mut AppContext) {
+    self::material_icons::init(app);
     self::view::init(app);
     self::file_tree::init(app);
     #[cfg(not(target_family = "wasm"))]

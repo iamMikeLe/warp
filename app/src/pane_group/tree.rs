@@ -4,6 +4,7 @@ use std::{fmt, iter, mem};
 use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::vector::Vector2F;
 use warp_core::features::FeatureFlag;
+use warp_core::ui::theme::color::internal_colors;
 use warp_errors::report_error;
 use warpui::elements::{
     ChildAnchor, ConstrainedBox, Container, DispatchEventResult, Element, Empty, EventHandler,
@@ -37,7 +38,7 @@ pub fn get_divider_thickness() -> f32 {
 // Extra padding for the divider to make it easier to resize.
 // This is added around each side of the divider. Only used
 // when minimalist UI is enabled.
-const DIVIDER_RESIZE_PADDING: f32 = 4.0;
+const DIVIDER_RESIZE_PADDING: f32 = 6.0;
 
 /// Tree for all of the split panes
 ///
@@ -1472,18 +1473,33 @@ fn create_minimalist_divider(
 
     let border_id = item.id;
     let mouse_state = item.mouse_state.clone();
-    let hoverable = Hoverable::new(item.mouse_state.clone(), |_| match direction {
-        SplitDirection::Horizontal => {
-            Container::new(divider.with_width(get_divider_thickness()).finish())
-                .with_padding_left(DIVIDER_RESIZE_PADDING)
-                .with_padding_right(DIVIDER_RESIZE_PADDING)
-                .finish()
-        }
-        SplitDirection::Vertical => {
-            Container::new(divider.with_height(get_divider_thickness()).finish())
-                .with_padding_top(DIVIDER_RESIZE_PADDING)
-                .with_padding_bottom(DIVIDER_RESIZE_PADDING)
-                .finish()
+    let active_line = theme.accent();
+    let active_background = internal_colors::fg_overlay_5(theme);
+    // While hovered or dragged, shade the whole grab zone and accent the line so the (otherwise
+    // invisible) hit area is obvious.
+    let hoverable = Hoverable::new(item.mouse_state.clone(), move |state| {
+        let active = state.is_hovered() || state.is_clicked();
+        let line = if active {
+            ConstrainedBox::new(Rect::new().with_background(active_line).finish())
+        } else {
+            divider
+        };
+        let zone = match direction {
+            SplitDirection::Horizontal => {
+                Container::new(line.with_width(get_divider_thickness()).finish())
+                    .with_padding_left(DIVIDER_RESIZE_PADDING)
+                    .with_padding_right(DIVIDER_RESIZE_PADDING)
+            }
+            SplitDirection::Vertical => {
+                Container::new(line.with_height(get_divider_thickness()).finish())
+                    .with_padding_top(DIVIDER_RESIZE_PADDING)
+                    .with_padding_bottom(DIVIDER_RESIZE_PADDING)
+            }
+        };
+        if active {
+            zone.with_background(active_background).finish()
+        } else {
+            zone.finish()
         }
     })
     .on_mouse_down(move |ctx, _, position| {

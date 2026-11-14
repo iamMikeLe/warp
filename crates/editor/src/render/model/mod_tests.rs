@@ -1,3 +1,4 @@
+use super::LeadingIndent;
 use std::cell::Cell;
 use std::sync::Arc;
 
@@ -2123,4 +2124,33 @@ mod char_cell_scroll {
         state.clamp_scroll_offset(CharOffset::from(6), 1, &[]);
         assert_eq!(state.scroll_offset(), 0);
     }
+}
+
+#[test]
+fn leading_indent_counts_spaces_and_expands_tabs() {
+    assert_eq!(
+        LeadingIndent::measure("    let x = 1;\n", 4),
+        LeadingIndent {
+            chars: 4,
+            columns: 4
+        }
+    );
+    // A tab advances to the next tab stop: 2 spaces + tab = 4 columns, + tab = 8.
+    assert_eq!(
+        LeadingIndent::measure("  \t\tfoo", 4),
+        LeadingIndent {
+            chars: 4,
+            columns: 8
+        }
+    );
+    assert_eq!(LeadingIndent::measure("foo", 4), LeadingIndent::default());
+}
+
+#[test]
+fn whitespace_only_lines_have_no_leading_indent() {
+    assert_eq!(
+        LeadingIndent::measure("        \n", 4),
+        LeadingIndent::default()
+    );
+    assert_eq!(LeadingIndent::measure("", 4), LeadingIndent::default());
 }

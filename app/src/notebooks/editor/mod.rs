@@ -273,6 +273,7 @@ pub fn rich_text_styles(appearance: &Appearance, font_settings: &FontSettings) -
         minimum_paragraph_height: Some(base_text.line_height()),
         cursor_width: 3.,
         highlight_urls: true,
+        rainbow_indent: None,
         table_style: markdown_table_style(appearance, appearance.ui_font_family(), font_size),
     }
 }

@@ -3,6 +3,7 @@ use warpui::elements::{DraggableState, MouseStateHandle};
 use super::FileTreeItem;
 use crate::appearance::Appearance;
 use crate::code::icon_from_file_path;
+use crate::code::material_icons::folder_icon;
 use crate::code_review::diff_state::GitFileStatus;
 use crate::ui_components::icons::Icon;
 use crate::ui_components::item_highlight::ImageOrIcon;
@@ -27,12 +28,13 @@ impl FileTreeItem {
                     .map(ToOwned::to_owned)
                     .unwrap_or_else(|| String::from("File"));
 
-                let icon_from_file_path =
-                    icon_from_file_path(metadata.path.as_str(), appearance).map(ImageOrIcon::Image);
+                let icon = icon_from_file_path(metadata.path.as_str(), appearance)
+                    .map(ImageOrIcon::Image)
+                    .unwrap_or(ImageOrIcon::Icon(Icon::File));
 
                 RenderState {
                     display_name,
-                    icon: icon_from_file_path.unwrap_or(ImageOrIcon::Icon(Icon::File)),
+                    icon,
                     is_expanded,
                     depth: *depth,
                     mouse_state: mouse_state_handle.clone(),
@@ -53,9 +55,12 @@ impl FileTreeItem {
                     .file_name()
                     .map(ToOwned::to_owned)
                     .unwrap_or_else(|| String::from("Folder"));
+                let icon = folder_icon(&display_name, is_expanded.unwrap_or(false), appearance)
+                    .map(ImageOrIcon::Image)
+                    .unwrap_or(ImageOrIcon::Icon(Icon::Folder));
                 RenderState {
                     display_name,
-                    icon: ImageOrIcon::Icon(Icon::Folder),
+                    icon,
                     is_expanded,
                     depth: *depth,
                     mouse_state: mouse_state_handle.clone(),

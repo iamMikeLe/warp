@@ -7,8 +7,15 @@ use warpui::elements::{CacheOption, Icon, Image};
 
 /// Returns a special icon for the given file path, if any.
 pub fn icon_from_file_path(path: &str, appearance: &Appearance) -> Option<Box<dyn Element>> {
-    let theme = appearance.theme();
     let parsed_path = Path::new(path);
+    if let Some(icon) = parsed_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| super::material_icons::file_icon(name, appearance))
+    {
+        return Some(icon);
+    }
+    let theme = appearance.theme();
     let extension = parsed_path.extension().and_then(|ext| ext.to_str());
 
     let image = match extension {

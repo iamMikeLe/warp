@@ -75,7 +75,8 @@ use crate::terminal::settings::{
     AltScreenPadding, AltScreenPaddingMode, Spacing, SpacingMode, TerminalSettings,
 };
 use crate::terminal::{
-    BlockListSettings, ShowBlockDividers, ShowJumpToBottomOfBlockButton, SizeInfo,
+    AlternateBlockBackgrounds, BlockListSettings, ShowBlockDividers, ShowJumpToBottomOfBlockButton,
+    SizeInfo,
 };
 use crate::themes::theme::{self, RespectSystemTheme, SelectedSystemThemes, ThemeKind, WarpTheme};
 use crate::themes::theme_chooser::ThemeChooserMode;
@@ -193,6 +194,38 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
         .is_supported_on_current_platform(
             BlockListSettings::as_ref(app)
                 .show_block_dividers
+                .is_supported_on_current_platform(),
+        ),
+    );
+
+    toggle_binding_pairs.push(
+        ToggleSettingActionPair::new(
+            "colored file icons",
+            builder(SettingsAction::AppearancePageToggle(
+                AppearancePageAction::ToggleColoredFileIcons,
+            )),
+            context,
+            flags::COLORED_FILE_ICONS_CONTEXT_FLAG,
+        )
+        .is_supported_on_current_platform(
+            CodeSettings::as_ref(app)
+                .colored_file_icons
+                .is_supported_on_current_platform(),
+        ),
+    );
+
+    toggle_binding_pairs.push(
+        ToggleSettingActionPair::new(
+            "alternating block backgrounds",
+            builder(SettingsAction::AppearancePageToggle(
+                AppearancePageAction::ToggleAlternateBlockBackgrounds,
+            )),
+            context,
+            flags::ALTERNATE_BLOCK_BACKGROUNDS_CONTEXT_FLAG,
+        )
+        .is_supported_on_current_platform(
+            BlockListSettings::as_ref(app)
+                .alternate_block_backgrounds
                 .is_supported_on_current_platform(),
         ),
     );
@@ -480,6 +513,8 @@ pub enum AppearancePageAction {
     ToggleWorkspaceDecorationVisibility,
     ToggleJumpToBottomOfBlockButton,
     ToggleShowBlockDividers,
+    ToggleAlternateBlockBackgrounds,
+    ToggleColoredFileIcons,
     ToggleCompactMode,
     ToggleCursorBlink,
     ToggleRespectSystemTheme,
@@ -620,6 +655,14 @@ impl TypedActionView for AppearanceSettingsPageView {
             ToggleWorkspaceDecorationVisibility => self.toggle_workspace_decoration_visiblity(ctx),
             ToggleJumpToBottomOfBlockButton => self.toggle_jump_to_bottom_of_block_button(ctx),
             ToggleShowBlockDividers => self.toggle_show_block_dividers(ctx),
+            ToggleAlternateBlockBackgrounds => self.toggle_alternate_block_backgrounds(ctx),
+            ToggleColoredFileIcons => {
+                CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings.colored_file_icons.toggle_and_save_value(ctx));
+                });
+                // The Appearance page does not subscribe to CodeSettings.
+                ctx.notify();
+            }
             ToggleCompactMode => self.toggle_compact_mode(ctx),
             ToggleCursorBlink => self.toggle_cursor_blink(ctx),
             ToggleOpenWindowsAtCustomSize => self.toggle_open_windows_at_custom_size(ctx),
@@ -1430,6 +1473,7 @@ impl AppearanceSettingsPageView {
             tools_panel_widgets.push(Box::new(ToolsPanelGlobalSearchWidget::default()));
         }
         tools_panel_widgets.push(Box::new(ToolsPanelWarpDriveWidget::default()));
+        tools_panel_widgets.push(Box::new(ColoredFileIconsWidget::default()));
         if !tools_panel_widgets.is_empty() {
             categories.push(Category::new("Tools panel", tools_panel_widgets));
         }
@@ -1460,6 +1504,7 @@ impl AppearanceSettingsPageView {
         if FeatureFlag::MinimalistUI.is_enabled() {
             block_settings_widgets.push(Box::new(ShowBlockDividersWidget::default()));
         }
+        block_settings_widgets.push(Box::new(AlternateBlockBackgroundsWidget::default()));
         categories.push(Category::new("Blocks", block_settings_widgets));
 
         let font_settings = FontSettings::as_ref(ctx);
@@ -2276,6 +2321,16 @@ impl AppearanceSettingsPageView {
                 block_list_settings
                     .show_block_dividers
                     .set_value(new_value, ctx)
+            );
+        });
+    }
+
+    pub fn toggle_alternate_block_backgrounds(&mut self, ctx: &mut ViewContext<Self>) {
+        BlockListSettings::handle(ctx).update(ctx, |settings, ctx| {
+            report_if_error!(
+                settings
+                    .alternate_block_backgrounds
+                    .toggle_and_save_value(ctx)
             );
         });
     }
@@ -4132,6 +4187,95 @@ impl SettingsWidget for ShowBlockDividersWidget {
                 })
                 .finish(),
             None,
+        )
+    }
+}
+
+#[derive(Default)]
+struct ColoredFileIconsWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for ColoredFileIconsWidget {
+    type View = AppearanceSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "colored file folder icons material icon theme project explorer"
+    }
+
+    fn render(
+        &self,
+        _view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        render_body_item::<AppearancePageAction>(
+            "Colored file icons".to_string(),
+            None,
+            LocalOnlyIconState::Hidden,
+            ToggleState::Enabled,
+            appearance,
+            appearance
+                .ui_builder()
+                .switch(self.switch_state.clone())
+                .check(*CodeSettings::as_ref(app).colored_file_icons)
+                .build()
+                .on_click(|evt_ctx, _app, _v2f| {
+                    evt_ctx.dispatch_typed_action(AppearancePageAction::ToggleColoredFileIcons);
+                })
+                .finish(),
+            Some(
+                "Type-specific colored icons for files and folders (Material Icon Theme)."
+                    .to_string(),
+            ),
+        )
+    }
+}
+
+#[derive(Default)]
+struct AlternateBlockBackgroundsWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for AlternateBlockBackgroundsWidget {
+    type View = AppearanceSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "alternate alternating block background tint stripe zebra"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let enabled = BlockListSettings::as_ref(app)
+            .alternate_block_backgrounds
+            .value();
+        render_body_item::<AppearancePageAction>(
+            "Alternate block backgrounds".into(),
+            None,
+            LocalOnlyIconState::for_setting(
+                AlternateBlockBackgrounds::storage_key(),
+                AlternateBlockBackgrounds::sync_to_cloud(),
+                &mut view.local_only_icon_tooltip_states.borrow_mut(),
+                app,
+            ),
+            ToggleState::Enabled,
+            appearance,
+            appearance
+                .ui_builder()
+                .switch(self.switch_state.clone())
+                .check(*enabled)
+                .build()
+                .on_click(move |ctx, _, _| {
+                    ctx.dispatch_typed_action(
+                        AppearancePageAction::ToggleAlternateBlockBackgrounds,
+                    );
+                })
+                .finish(),
+            Some("Gives every other block a subtle background so each one's start and end stand out.".into()),
         )
     }
 }
