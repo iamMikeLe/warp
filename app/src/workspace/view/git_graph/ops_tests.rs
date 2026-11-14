@@ -618,3 +618,61 @@ fn remote_sourced_refs_are_fully_qualified() {
         Some("refs/tags/-x")
     );
 }
+
+#[test]
+fn staging_passes_paths_literally_after_double_dash() {
+    let op = GitWriteOp::StageFiles {
+        paths: vec!["--force".into(), ":(glob)*".into()],
+    };
+    assert_eq!(
+        op.args(),
+        [
+            "--literal-pathspecs",
+            "add",
+            "-A",
+            "--",
+            "--force",
+            ":(glob)*"
+        ]
+    );
+    assert!(op.validate().is_ok());
+    let op = GitWriteOp::UnstageFiles {
+        paths: vec!["src/a.rs".into()],
+    };
+    assert_eq!(
+        op.args(),
+        ["--literal-pathspecs", "reset", "-q", "--", "src/a.rs"]
+    );
+    assert!(GitWriteOp::StageFiles { paths: vec![] }.validate().is_err());
+    assert!(op.is_staging());
+}
+
+#[test]
+fn commit_sends_summary_and_optional_description_as_messages() {
+    let op = GitWriteOp::Commit {
+        summary: "feat: add staging".into(),
+        description: "Longer text\n\nwith paragraphs".into(),
+    };
+    assert_eq!(
+        op.args(),
+        [
+            "commit",
+            "-m",
+            "feat: add staging",
+            "-m",
+            "Longer text\n\nwith paragraphs"
+        ]
+    );
+    let op = GitWriteOp::Commit {
+        summary: "fix".into(),
+        description: "  ".into(),
+    };
+    assert_eq!(op.args(), ["commit", "-m", "fix"]);
+    let empty = GitWriteOp::Commit {
+        summary: " ".into(),
+        description: String::new(),
+    };
+    assert!(empty.validate().is_err());
+    assert_eq!(empty.confirm_message(), None);
+    assert!(!empty.is_staging());
+}

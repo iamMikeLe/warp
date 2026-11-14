@@ -13,6 +13,7 @@
 //!   functions, the core algorithm).
 //! - [`row_canvas`] custom drawing element for a single row of lanes (vertical
 //!   lines / dots / orthogonal polylines).
+//! - [`staging`]    the uncommitted-changes panel: stage / unstage files and commit.
 //! - [`view`]       the Git Graph view in the left panel.
 //! - [`auto_refresh`] keeps the graph in sync with git operations made outside
 //!   the panel (terminal / IDE / external git) by subscribing to the selected
@@ -28,6 +29,7 @@ pub(crate) mod layout;
 pub(crate) mod menu;
 pub(crate) mod ops;
 pub(crate) mod row_canvas;
+pub(crate) mod staging;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub(crate) mod view;
