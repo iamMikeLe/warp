@@ -57,8 +57,9 @@ the terminal:
   delete it.
 - **Details:** click a task to open it in a resizable area under the list: edit its title and
   write a description in Warp's notebook editor (headings, lists, code blocks with syntax
-  highlighting, and a "/" menu to insert blocks). Changes save as you type; tasks with a
-  description show a file icon.
+  highlighting, and a "/" menu to insert blocks). A **Formatted | Raw** switch shows the
+  description as plain markdown instead, to check or edit it as written. Changes save as you
+  type; tasks with a description show a file icon.
 - **Archive:** "Archive done" moves every finished task into a collapsed **Archived** section,
   grouped by the day it was finished. Right-click an archived task to restore or delete it.
 - **Storage:** one list shared by every window, saved on each change to `notes.json` in the app's
