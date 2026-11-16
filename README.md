@@ -1,114 +1,120 @@
-> **This fork adds a Git Graph panel** (GitKraken-style commit history) to Warp.
-> See **[GIT_GRAPH.md](GIT_GRAPH.md)** for features, credits, and build instructions.
-> Everything below is Warp's original README.
+# Warp, with a Git Graph, Worktrees and Notes
 
-<a href="https://www.warp.dev">
-    <img width="1024" alt="Warp Agentic Development Environment product preview" src="https://github.com/user-attachments/assets/9976b2da-2edd-4604-a36c-8fd53719c6d4" />
-</a>
-&nbsp;
-<p align="center">
-  <a href="https://warp.dev/factories"><img height="20" alt="Built with Warp" src="https://raw.githubusercontent.com/warpdotdev/brand-assets/main/Github/Built-With-Warp-Export@2x.png" /></a>
-</p>
+A personal build of [Warp](https://github.com/warpdotdev/warp), the open-source terminal written
+in Rust, with the developer tools I use every day alongside AI coding agents: a GitKraken-style
+**Git Graph**, a **Worktrees** panel that shows which agent is working where, and a **Notes**
+panel for the day's todo list. I keep it in sync with upstream Warp and build it as my own macOS
+app.
 
-<p align="center">
-  <a href="https://www.warp.dev">Website</a>
-  ·
-  <a href="https://www.warp.dev/code">Code</a>
-  ·
-  <a href="https://www.warp.dev/agents">Agents</a>
-  ·
-  <a href="https://www.warp.dev/terminal">Terminal</a>
-  ·
-  <a href="https://www.warp.dev/drive">Drive</a>
-  ·
-  <a href="https://docs.warp.dev">Docs</a>
-  ·
-  <a href="https://www.warp.dev/blog/how-warp-works">How Warp Works</a>
-</p>
+> Unofficial fork, not affiliated with Warp. For Warp itself, see
+> [warpdotdev/warp](https://github.com/warpdotdev/warp).
 
-> [!NOTE]
-> OpenAI is the founding sponsor of the new, open-source Warp repository, and the new agentic management workflows are powered by GPT models.
+<!-- Screenshots: add images to docs/screenshots/ and uncomment.
+![Git Graph](docs/screenshots/git-graph.png)
+-->
 
-<h1></h1>
+## What this fork adds
 
-## About
+All of these live in Warp's tools panel and can be shown, hidden and reordered from Settings.
 
-[Warp](https://www.warp.dev) is an agentic development environment, born out of the terminal. Use Warp's built-in coding agent, or bring your own CLI agent (Claude Code, Codex, Gemini CLI, and others).
+### Git Graph
 
-## Installation
+Commit history without leaving the terminal.
 
-You can [download Warp](https://www.warp.dev/download) and [read our docs](https://docs.warp.dev/) for platform-specific instructions.
+- A lane-based commit graph with resizable **Branch / Tag | Graph | Commit message** columns and
+  author avatars as graph nodes.
+- Commit details: message, author, changed files with `+/-` counts; click a file for a read-only
+  diff.
+- Stage, unstage and commit from the uncommitted-changes row.
+- Right-click git operations (checkout, branch and tag management, merge, rebase, reset,
+  cherry-pick, revert, push/pull, stashes), each confirmed before it runs.
+- Auto-refresh when the repository changes, a branch filter, and a picker for folders with
+  several repositories.
 
-## Warp Contributions Overview Dashboard
+<!-- ![Worktrees panel](docs/screenshots/worktrees.png) -->
 
-Explore [build.warp.dev](https://build.warp.dev) to:
-- Watch thousands of [Warp Factory](warp.dev/factories) agents triage issues, write specs, implement changes, and review PRs
-- View top contributors and in-flight features
-- Track your own issues with GitHub sign-in
-- Click into active agent sessions in a web-compiled Warp terminal
+### Worktrees
 
-## Automate development with Warp Factories
+For agent-heavy workflows where several git worktrees branch off the same base.
 
-This repository is driven by [Warp Factories](https://warp.dev/factories): open, flexible infrastructure for teams to build cloud software factories of their own.
+- Every worktree of the repository hangs under the branch it was created from, read from the
+  branch's reflog.
+- Each card shows the branch, commits ahead/behind, uncommitted changes, and the Claude Code
+  sessions running in it with their state (working, needs you, idle).
+- Click a card to open a terminal in that worktree.
 
-Warp Factories are defined in code and easy to deploy on any model or harness, with evals, benchmarks, and self-improvement built in. [Get early access](https://warp.dev/factories) or [book a demo](https://warp.dev/get-started) for a tailored walk-through of the platform. Eligible teams can receive up to $10,000 in free factory usage.
+<!-- ![Notes panel](docs/screenshots/notes.png) -->
 
-## Licensing
+### Notes
 
-Warp's UI framework (the `warpui_core` and `warpui` crates) are licensed under the [MIT license](LICENSE-MIT).
+A daily todo list next to the terminal.
 
-The rest of the code in this repository is licensed under the [AGPL v3](LICENSE-AGPL).
+- Add tasks, tick them off, and move finished ones to an archive grouped by the day they were
+  done.
+- Click a task to open its details: a title and a rich-text description (headings, lists, code
+  blocks with syntax highlighting, a `/` block menu), with a **Formatted | Raw** markdown toggle.
+- One list shared by every window, saved locally as you type.
 
-## Open Source & Contributing
+### Smaller additions
 
-Warp's client codebase is open source and lives in this repository. We welcome community contributions and have designed a lightweight workflow to help new contributors get started. For the full contribution flow, read our [CONTRIBUTING.md](CONTRIBUTING.md) guide.
+Reorderable tools-panel buttons, split-pane tools (collapse a pane to a strip, open files beside
+the terminal), whole-word global search, browsing subfolders from the working-directory menu,
+alternating block backgrounds, colored file icons, and two themes (Samurai and Sakura).
 
-> [!TIP]
-> **Chat with contributors and the Warp team** in the [`#oss-contributors`](https://warpcommunity.slack.com/archives/C0B0LM8N4DB) Slack channel — a good place for ad-hoc questions, design discussion, and pairing with maintainers. New here? [Join the Warp Slack community](https://go.warp.dev/join-preview) first, then jump into `#oss-contributors`.
+Full feature notes, build steps and how the fork is maintained: **[GIT_GRAPH.md](GIT_GRAPH.md)**.
 
-### Issue to PR
+## Tech stack
 
-Before filing, [search existing issues](https://github.com/warpdotdev/warp/issues?q=is%3Aissue+is%3Aopen+sort%3Areactions-%2B1-desc) for your bug or feature request. If nothing exists, [file an issue](https://github.com/warpdotdev/warp/issues/new/choose) using our templates. Security vulnerabilities should be reported privately as described in [CONTRIBUTING.md](CONTRIBUTING.md#reporting-security-issues).
+| Area | Technology |
+|---|---|
+| Language | Rust, in a Cargo workspace of about 80 crates |
+| UI | WarpUI, Warp's own GPU-rendered UI framework (Flutter-inspired layout, entity/handle state model) |
+| Rendering | wgpu with WGSL shaders; Metal on macOS |
+| Platform | winit, native macOS APIs through objc2; Linux and Windows builds |
+| Terminal | vte-based escape-sequence parsing, pty in a separate terminal-server process |
+| Async | tokio and futures; git and file work runs off the UI thread |
+| Data | SQLite via Diesel, serde, GraphQL via cynic, protobuf via prost |
+| Quality | unit tests (cargo-nextest), Clippy with `-D warnings`, rustfmt |
 
-Once filed, a Warp maintainer reviews the issue and may apply a readiness label: [`ready-to-spec`](https://github.com/warpdotdev/warp/issues?q=is%3Aissue+is%3Aopen+label%3Aready-to-spec) signals the design is open for contributors to spec out, and [`ready-to-implement`](https://github.com/warpdotdev/warp/issues?q=is%3Aissue+is%3Aopen+label%3Aready-to-implement) signals the design is settled and code PRs are welcome. Anyone can pick up a labeled issue — mention **@oss-maintainers** on an issue if you'd like it considered for a readiness label.
+Highlights from building the fork:
 
-### Building the Repo Locally
+- **Readable graphs on busy repositories:** stashes attach to their base commit instead of
+  opening lanes that never close (one repository needed 168 lanes before the fix).
+- **Safe git calls:** branch and tag names are passed as fully qualified refs after
+  `--end-of-options` and validated before git runs.
+- **Safe local data:** Notes writes atomically (temp file and rename) and refuses to overwrite a
+  file it can't read.
+- **Upstream bug fix:** tools-panel buttons were matched to their mouse state by position, so a
+  fifth panel's button silently disappeared.
 
-To build and run Warp from source:
+## Building
 
-```bash
-./script/bootstrap   # platform-specific setup
-./script/run         # build and run Warp
-./script/presubmit   # fmt, clippy, and tests
+macOS, with Xcode, Rust via `rustup`, `brew install protobuf pkgconf` and
+`cargo install --locked cargo-bundle@0.11.0`:
+
+```sh
+git switch daily
+WARP_SKIP_COMMON_SKILLS_INSTALL=1 ./script/run --features git_graph,open_directory_in_external_editor
 ```
 
-See [AGENTS.md](AGENTS.md) for the full engineering guide, including coding style, testing, and platform-specific notes.
+This opens **WarpOss**, which keeps its settings in `~/.warp-oss` and doesn't touch an installed
+Warp. `script/macos/personal_dmg` builds a signed release app as a DMG. Details in
+[GIT_GRAPH.md](GIT_GRAPH.md).
 
-## Joining the Team
+## Branches
 
-Interested in joining the team? See our [open roles](https://www.warp.dev/careers).
+Each feature has its own branch, and **`daily`** combines them into the build I use. `git-graph`
+contains only the Git Graph, kept ready to propose upstream. The full branch map is in
+[GIT_GRAPH.md](GIT_GRAPH.md#branches).
 
-## Support and Questions
+## Credits
 
-1. See our [docs](https://docs.warp.dev/) for a comprehensive guide to Warp's features.
-2. Join our [Slack Community](https://go.warp.dev/join-preview) to connect with other users and get help from the Warp team — contributors hang out in [`#oss-contributors`](https://warpcommunity.slack.com/archives/C0B0LM8N4DB).
-3. Try our [Preview build](https://www.warp.dev/download-preview) to test the latest experimental features.
-4. Mention **@oss-maintainers** on any issue to escalate to the team — for example, if you encounter problems with the automated agents.
+The Git Graph panel was started by [@0xBB2B](https://github.com/0xBB2B) in
+[warpdotdev/warp#12043](https://github.com/warpdotdev/warp/pull/12043); I brought it up to date
+with upstream and extended it. Everything else is built on Warp's open-source codebase.
 
-## Code of Conduct
+## License
 
-We ask everyone to be respectful and empathetic. Warp follows the [Code of Conduct](CODE_OF_CONDUCT.md). To report violations, email warp-coc at warp.dev.
-
-## Open Source Dependencies
-
-We'd like to call out a few of the [open source dependencies](https://docs.warp.dev/help/licenses) that have helped Warp to get off the ground:
-
-- [Tokio](https://github.com/tokio-rs/tokio)
-- [NuShell](https://github.com/nushell/nushell)
-- [Fig Completion Specs](https://github.com/withfig/autocomplete)
-- [Warp Server Framework](https://github.com/seanmonstar/warp)
-- [Alacritty](https://github.com/alacritty/alacritty)
-- [Hyper HTTP library](https://github.com/hyperium/hyper)
-- [FontKit](https://github.com/servo/font-kit)
-- [Core-foundation](https://github.com/servo/core-foundation-rs)
-- [Smol](https://github.com/smol-rs/smol)
+Same as Warp: AGPL-3.0 (with MIT-licensed parts); see [LICENSE-AGPL](LICENSE-AGPL) and
+[LICENSE-MIT](LICENSE-MIT). GitKraken and Warp are trademarks of their respective owners; this
+project is not affiliated with or endorsed by either.
