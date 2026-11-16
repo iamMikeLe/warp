@@ -16,13 +16,12 @@ use warpui::{AppContext, SingletonEntity as _, ViewContext};
 
 use super::appearance_page::{AppearancePageAction, AppearanceSettingsPageView};
 use super::settings_page::SettingsWidget;
-use crate::AISettings;
 use crate::appearance::Appearance;
 use crate::drive::settings::WarpDriveSettings;
-use crate::report_if_error;
 use crate::settings::{CodeSettings, GitSettings};
 use crate::ui_components::buttons::icon_button;
 use crate::workspace::view::left_panel::sort_by_saved_order;
+use crate::{AISettings, report_if_error};
 
 /// One row of the list.
 struct ToolsPanelItem {
@@ -42,6 +41,7 @@ const ALL_IDS: &[&str] = &[
     "warp_drive",
     "git_graph",
     "worktrees",
+    "notes",
 ];
 
 /// The panels available in this build, in the user's order.
@@ -95,6 +95,15 @@ fn items(app: &AppContext) -> Vec<ToolsPanelItem> {
             icon: Icon::Dataflow,
             visible: |app| *GitSettings::as_ref(app).show_worktrees,
             toggle: AppearancePageAction::ToggleToolsPanelWorktrees,
+        });
+    }
+    if cfg!(feature = "local_fs") {
+        items.push(ToolsPanelItem {
+            id: "notes",
+            label: "Notes",
+            icon: Icon::CalendarCheck,
+            visible: |app| *CodeSettings::as_ref(app).show_notes,
+            toggle: AppearancePageAction::ToggleToolsPanelNotes,
         });
     }
     sort_by_saved_order(

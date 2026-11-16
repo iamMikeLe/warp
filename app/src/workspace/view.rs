@@ -13,6 +13,7 @@ pub(crate) mod git_graph;
 pub mod global_search;
 pub(crate) mod launch_modal;
 pub(crate) mod left_panel;
+pub(crate) mod notes;
 pub(crate) mod onboarding;
 pub(crate) mod openwarp_launch_modal;
 pub(crate) mod orchestration_launch_modal;
@@ -3270,6 +3271,7 @@ impl Workspace {
                 CodeSettingsChangedEvent::ShowProjectExplorer { .. }
                     | CodeSettingsChangedEvent::ShowGlobalSearch { .. }
                     | CodeSettingsChangedEvent::ToolsPanelOrder { .. }
+                    | CodeSettingsChangedEvent::ShowNotes { .. }
             ) {
                 me.update_left_panel_available_views(ctx);
                 ctx.notify();
@@ -4410,6 +4412,7 @@ impl Workspace {
                 LeftPanelDisplayedTab::ConversationListView => ToolPanelView::ConversationListView,
                 LeftPanelDisplayedTab::GitGraph => ToolPanelView::GitGraph,
                 LeftPanelDisplayedTab::Worktrees => ToolPanelView::Worktrees,
+                LeftPanelDisplayedTab::Notes => ToolPanelView::Notes,
             };
             lp.restore_active_view_from_snapshot(active_view, ctx);
             lp.set_active_pane_group(pane_group.clone(), &self.working_directories_model, ctx);
@@ -20945,6 +20948,7 @@ impl Workspace {
                         ToolPanelView::ConversationListView => "Agent conversations",
                         ToolPanelView::GitGraph => "Git Graph",
                         ToolPanelView::Worktrees => "Worktrees",
+                        ToolPanelView::Notes => "Notes",
                     }
                 } else {
                     "Tools panel"
@@ -21001,6 +21005,7 @@ impl Workspace {
                 ToolPanelView::ConversationListView => "Agent conversations",
                 ToolPanelView::GitGraph => "Git Graph",
                 ToolPanelView::Worktrees => "Worktrees",
+                ToolPanelView::Notes => "Notes",
             }
         } else {
             "Tools panel"
@@ -24263,6 +24268,9 @@ impl Workspace {
         {
             views.push(ToolPanelView::Worktrees);
         }
+        if cfg!(feature = "local_fs") && *CodeSettings::as_ref(ctx).show_notes.value() {
+            views.push(ToolPanelView::Notes);
+        }
         left_panel::sort_by_saved_order(
             &mut views,
             |view| view.stable_id(),
@@ -27014,6 +27022,9 @@ impl View for Workspace {
         }
         if *CodeSettings::as_ref(app).show_global_search {
             context.set.insert(flags::SHOW_GLOBAL_SEARCH);
+        }
+        if *CodeSettings::as_ref(app).show_notes {
+            context.set.insert(flags::SHOW_NOTES);
         }
         if *CodeSettings::as_ref(app).show_hidden_files {
             context.set.insert(flags::SHOW_HIDDEN_FILES);

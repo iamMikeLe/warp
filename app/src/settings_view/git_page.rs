@@ -3,12 +3,13 @@
 //! to `widgets` as a new [`SettingsWidget`], with no change to the page structure.
 
 use settings::{Setting as _, ToggleableSetting as _};
-use warpui::Action;
 use warpui::elements::{Element, Flex};
 use warpui::keymap::ContextPredicate;
 use warpui::ui_components::components::UiComponent;
 use warpui::ui_components::switch::SwitchStateHandle;
-use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
+use warpui::{
+    Action, AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
+};
 
 use super::settings_page::{
     MatchData, PageType, SettingsPageEvent, SettingsPageMeta, SettingsPageViewHandle,

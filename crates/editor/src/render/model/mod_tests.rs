@@ -1,4 +1,3 @@
-use super::LeadingIndent;
 use std::cell::Cell;
 use std::sync::Arc;
 
@@ -20,7 +19,7 @@ use super::debug::Describe;
 use super::test_utils::{layout_paragraph, layout_paragraphs};
 use super::{
     BlockItem, BlockLocation, COMMAND_SPACING, CellLayout, DEFAULT_BLOCK_SPACINGS,
-    HiddenBlockConfig, ImageBlockConfig, LaidOutTable, ParagraphBlock, RenderState,
+    HiddenBlockConfig, ImageBlockConfig, LaidOutTable, LeadingIndent, ParagraphBlock, RenderState,
     TableBlockConfig, TableStyle, table_offset_map,
 };
 use crate::content::edit::ParsedUrl;

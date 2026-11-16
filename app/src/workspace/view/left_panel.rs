@@ -66,6 +66,7 @@ use crate::workspace::view::git_graph::GitGraphView;
 use crate::workspace::view::global_search::view::{
     Event as GlobalSearchViewEvent, GlobalSearchEntryFocus, GlobalSearchView,
 };
+use crate::workspace::view::notes::NotesView;
 use crate::workspace::view::worktrees::{WorktreesEvent, WorktreesView};
 use crate::workspace::view::{
     LEFT_PANEL_AGENT_CONVERSATIONS_BINDING_NAME, LEFT_PANEL_GIT_GRAPH_BINDING_NAME,
@@ -84,6 +85,7 @@ struct MouseStateHandles {
     warp_drive_button: MouseStateHandle,
     git_graph_button: MouseStateHandle,
     worktrees_button: MouseStateHandle,
+    notes_button: MouseStateHandle,
     open_terminal_button: MouseStateHandle,
     sign_in_button: MouseStateHandle,
 }
@@ -98,6 +100,7 @@ pub enum LeftPanelAction {
     ConversationListView,
     GitGraph,
     Worktrees,
+    Notes,
     /// Open a new terminal at the right edge of the current tab (e.g. after closing the last one).
     OpenTerminal,
     SignIn,
@@ -116,7 +119,8 @@ impl ToolPanelView {
             ToolPanelView::ProjectExplorer
             | ToolPanelView::GlobalSearch { .. }
             | ToolPanelView::GitGraph
-            | ToolPanelView::Worktrees => ToolPanelAvailability::Available,
+            | ToolPanelView::Worktrees
+            | ToolPanelView::Notes => ToolPanelAvailability::Available,
             ToolPanelView::WarpDrive => {
                 if WarpDriveSettings::is_warp_drive_available(app) {
                     ToolPanelAvailability::Available
@@ -181,6 +185,7 @@ pub enum ToolPanelView {
     ConversationListView,
     GitGraph,
     Worktrees,
+    Notes,
 }
 
 impl ToolPanelView {
@@ -193,6 +198,7 @@ impl ToolPanelView {
             ToolPanelView::ConversationListView => "conversations",
             ToolPanelView::GitGraph => "git_graph",
             ToolPanelView::Worktrees => "worktrees",
+            ToolPanelView::Notes => "notes",
         }
     }
 }
@@ -279,6 +285,7 @@ pub struct LeftPanelView {
     conversation_list_view: ViewHandle<ConversationListView>,
     git_graph_view: ViewHandle<GitGraphView>,
     worktrees_view: ViewHandle<WorktreesView>,
+    notes_view: ViewHandle<NotesView>,
     active_view: active_view_state::ActiveViewState,
     toolbelt_buttons: Vec<ToolbeltButtonConfig>,
     active_pane_group: Option<WeakViewHandle<PaneGroup>>,
@@ -339,6 +346,7 @@ impl LeftPanelView {
                 | ToolPanelView::GlobalSearch { .. }
                 | ToolPanelView::GitGraph
                 | ToolPanelView::Worktrees
+                | ToolPanelView::Notes
                 | ToolPanelView::WarpDrive,
                 ToolPanelAvailability::RequiresAi,
             )
@@ -346,7 +354,8 @@ impl LeftPanelView {
                 ToolPanelView::ProjectExplorer
                 | ToolPanelView::GlobalSearch { .. }
                 | ToolPanelView::GitGraph
-                | ToolPanelView::Worktrees,
+                | ToolPanelView::Worktrees
+                | ToolPanelView::Notes,
                 ToolPanelAvailability::RequiresAccount,
             )
             | (_, ToolPanelAvailability::Available) => {
@@ -428,6 +437,7 @@ impl LeftPanelView {
         let conversation_list_view = ctx.add_typed_action_view(ConversationListView::new);
         let git_graph_view = ctx.add_typed_action_view(GitGraphView::new);
         let worktrees_view = ctx.add_typed_action_view(WorktreesView::new);
+        let notes_view = ctx.add_typed_action_view(NotesView::new);
         ctx.subscribe_to_view(&worktrees_view, |_me, _, event, ctx| match event {
             WorktreesEvent::OpenDirectoryInNewTab(path) => {
                 ctx.emit(LeftPanelEvent::OpenDirectoryInNewTab(path.clone()));
@@ -610,6 +620,7 @@ impl LeftPanelView {
             conversation_list_view,
             git_graph_view,
             worktrees_view,
+            notes_view,
             active_view: active_view_state::new(active_view),
             toolbelt_buttons,
             active_pane_group: None,
@@ -774,6 +785,15 @@ impl LeftPanelView {
                 tooltip_keybinding: None,
                 tooltip_keybinding_names: Vec::new(),
             },
+            ToolPanelView::Notes => ToolbeltButtonConfig {
+                icon: Icon::CalendarCheck,
+                active_icon: None,
+                tooltip_text: "Notes".to_string(),
+                action: LeftPanelAction::Notes,
+                render_with_active_state: false,
+                tooltip_keybinding: None,
+                tooltip_keybinding_names: Vec::new(),
+            },
         }
     }
 
@@ -788,6 +808,7 @@ impl LeftPanelView {
             LeftPanelAction::ConversationListView => handles.conversation_list_view_button.clone(),
             LeftPanelAction::GitGraph => handles.git_graph_button.clone(),
             LeftPanelAction::Worktrees => handles.worktrees_button.clone(),
+            LeftPanelAction::Notes => handles.notes_button.clone(),
             LeftPanelAction::OpenTerminal => handles.open_terminal_button.clone(),
             LeftPanelAction::SignIn => handles.sign_in_button.clone(),
         }
@@ -1069,6 +1090,7 @@ impl LeftPanelView {
             }
             ToolPanelView::GitGraph => ctx.focus(&self.git_graph_view),
             ToolPanelView::Worktrees => ctx.focus(&self.worktrees_view),
+            ToolPanelView::Notes => ctx.focus(&self.notes_view),
         }
     }
 
@@ -1237,6 +1259,7 @@ impl LeftPanelView {
                 }
                 LeftPanelAction::GitGraph => self.active_view.get() == ToolPanelView::GitGraph,
                 LeftPanelAction::Worktrees => self.active_view.get() == ToolPanelView::Worktrees,
+                LeftPanelAction::Notes => self.active_view.get() == ToolPanelView::Notes,
                 LeftPanelAction::OpenTerminal | LeftPanelAction::SignIn => false,
             };
         }
@@ -1383,6 +1406,9 @@ impl LeftPanelView {
                     send_telemetry_from_ctx!(TelemetryEvent::ConversationListViewOpened, ctx);
                 }
             }
+            LeftPanelAction::Notes => {
+                active_view_state::set(self, ToolPanelView::Notes, ctx);
+            }
             LeftPanelAction::SignIn => {
                 ctx.emit(LeftPanelEvent::SignInRequested);
             }
@@ -1517,6 +1543,7 @@ impl View for LeftPanelView {
                 ToolPanelView::ConversationListView => ctx.focus(&self.conversation_list_view),
                 ToolPanelView::GitGraph => ctx.focus(&self.git_graph_view),
                 ToolPanelView::Worktrees => ctx.focus(&self.worktrees_view),
+                ToolPanelView::Notes => ctx.focus(&self.notes_view),
             }
         }
     }
@@ -1613,6 +1640,9 @@ impl View for LeftPanelView {
                 .finish(),
                 ToolPanelView::Worktrees => {
                     Shrinkable::new(1.0, ChildView::new(&self.worktrees_view).finish()).finish()
+                }
+                ToolPanelView::Notes => {
+                    Shrinkable::new(1.0, ChildView::new(&self.notes_view).finish()).finish()
                 }
             }
         };

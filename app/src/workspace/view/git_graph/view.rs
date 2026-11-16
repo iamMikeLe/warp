@@ -23,6 +23,7 @@ use repo_metadata::Repository;
 use repo_metadata::repositories::{DetectedRepositories, RepoDetectionSource};
 #[cfg(feature = "local_fs")]
 use repo_metadata::repository::SubscriberId;
+use settings::Setting as _;
 use warp_core::ui::Icon;
 use warp_core::ui::color::pick_foreground_color;
 use warp_core::ui::theme::color::internal_colors;
@@ -73,7 +74,6 @@ use crate::settings::{GitSettings, GitSettingsChangedEvent};
 use crate::ui_components::buttons::icon_button;
 use crate::ui_components::item_highlight::ItemHighlightState;
 use crate::view_components::dropdown::{Dropdown, DropdownAction, DropdownEvent};
-use settings::Setting as _;
 
 /// Number of commits loaded per page.
 const COMMIT_PAGE_SIZE: usize = 200;

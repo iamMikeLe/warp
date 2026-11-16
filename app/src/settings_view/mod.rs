@@ -686,6 +686,7 @@ pub mod flags {
     pub const SHOW_CONVERSATION_HISTORY: &str = "ShowConversationHistory";
     pub const SHOW_PROJECT_EXPLORER: &str = "ShowProjectExplorer";
     pub const SHOW_GLOBAL_SEARCH: &str = "ShowGlobalSearch";
+    pub const SHOW_NOTES: &str = "ShowNotes";
     pub const SHOW_HIDDEN_FILES: &str = "ShowHiddenFiles";
 }
 

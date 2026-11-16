@@ -308,6 +308,15 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
     ));
 
     toggle_binding_pairs.push(ToggleSettingActionPair::new(
+        "notes in tools panel",
+        builder(SettingsAction::AppearancePageToggle(
+            AppearancePageAction::ToggleToolsPanelNotes,
+        )),
+        context,
+        flags::SHOW_NOTES,
+    ));
+
+    toggle_binding_pairs.push(ToggleSettingActionPair::new(
         "agent font matching terminal font",
         builder(SettingsAction::AppearancePageToggle(
             AppearancePageAction::ToggleMatchAIToTerminalFontFamily,
@@ -545,6 +554,7 @@ pub enum AppearancePageAction {
     ResetToolsPanelOrder,
     ToggleToolsPanelGitGraph,
     ToggleToolsPanelWorktrees,
+    ToggleToolsPanelNotes,
     SetEnforceMinimumContrast(EnforceMinimumContrast),
     OpenUrl(String),
     ToggleFocusPaneOnHover,
@@ -690,6 +700,12 @@ impl TypedActionView for AppearanceSettingsPageView {
             ToggleToolsPanelGlobalSearch => {
                 CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(settings.show_global_search.toggle_and_save_value(ctx));
+                });
+                ctx.notify();
+            }
+            ToggleToolsPanelNotes => {
+                CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings.show_notes.toggle_and_save_value(ctx));
                 });
                 ctx.notify();
             }

@@ -8,6 +8,7 @@ use std::path::Path;
 use ai::diff_validation::DiffDelta;
 use lazy_static::lazy_static;
 use num_traits::SaturatingSub;
+use pathfinder_color::ColorU;
 use pathfinder_geometry::vector::vec2f;
 use settings::Setting as _;
 use string_offset::CharOffset;
@@ -77,8 +78,6 @@ use crate::code_review::comments::{CommentId, CommentOrigin};
 use crate::editor::InteractionState;
 use crate::features::FeatureFlag;
 use crate::notebooks::editor::rich_text_styles;
-use pathfinder_color::ColorU;
-
 use crate::settings::{
     AppEditorSettings, CodeEditorLineNumberMode, CodeSettings, CodeSettingsChangedEvent,
     FontSettings,

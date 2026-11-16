@@ -47,6 +47,22 @@ branch off the same base:
 - Agent states refresh every few seconds and git state about every 30 seconds, only while the
   tab is open. Toggle the tab in Settings → Git or the Command Palette.
 
+## Notes panel
+
+A tools-panel tab (the calendar-check icon) for a daily todo list, so the day's goals sit next to
+the terminal:
+
+- **Today list:** type a task and press Enter to add it; tick the checkbox to mark it done (it
+  stays on the list, struck through). Double-click a task to edit it; right-click to mark it
+  done, edit, archive, or delete it.
+- **Archive:** "Archive done" moves every finished task into a collapsed **Archived** section,
+  grouped by the day it was finished. Right-click an archived task to restore or delete it.
+- **Storage:** one list shared by every window, saved on each change to `notes.json` in the app's
+  data directory (`~/.warp-oss/notes.json` for WarpOss). If the file can't be read, the panel
+  says so and stops saving rather than overwrite it.
+- Show, hide, or reorder the tab in Settings → Appearance → Tools panel, or toggle it from the
+  Command Palette.
+
 ## Credits and what I've added
 
 The Git Graph panel was originally written by [@0xBB2B](https://github.com/0xBB2B)
@@ -87,6 +103,8 @@ I picked it up from there. My work on top of it:
   (cascading panels), based directly on upstream Warp.
 - **`tools-panel-order`**: reorder and show/hide the tools panel's buttons from Settings, based
   directly on upstream Warp.
+- **`notes`**: a Notes tools-panel tab with a daily todo list and an archive, based directly on
+  upstream Warp.
 - **`daily`**: everything combined; the build I use day to day.
 
 Rules for working on this fork (for me and for any coding agent working in it):
@@ -152,9 +170,10 @@ git switch japanese-themes && git merge upstream/master
 git switch search-whole-word && git merge upstream/master
 git switch cd-nested-folders && git merge upstream/master
 git switch tools-panel-order && git merge upstream/master
+git switch notes       && git merge upstream/master
 git switch worktrees   && git merge git-graph
-git switch daily       && git merge worktrees ui-tweaks pane-layout japanese-themes search-whole-word tools-panel-order cd-nested-folders
-git push origin git-graph ui-tweaks pane-layout japanese-themes search-whole-word tools-panel-order cd-nested-folders worktrees daily
+git switch daily       && git merge worktrees ui-tweaks pane-layout japanese-themes search-whole-word tools-panel-order cd-nested-folders notes
+git push origin git-graph ui-tweaks pane-layout japanese-themes search-whole-word tools-panel-order cd-nested-folders notes worktrees daily
 ```
 
 If a build fails after an upstream merge, run `./script/bootstrap --skip-common-skills` once to
