@@ -275,6 +275,15 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
     ));
 
     toggle_binding_pairs.push(ToggleSettingActionPair::new(
+        "notes in tools panel",
+        builder(SettingsAction::AppearancePageToggle(
+            AppearancePageAction::ToggleToolsPanelNotes,
+        )),
+        context,
+        flags::SHOW_NOTES,
+    ));
+
+    toggle_binding_pairs.push(ToggleSettingActionPair::new(
         "agent font matching terminal font",
         builder(SettingsAction::AppearancePageToggle(
             AppearancePageAction::ToggleMatchAIToTerminalFontFamily,
@@ -502,6 +511,7 @@ pub enum AppearancePageAction {
     ToggleToolsPanelGlobalSearch,
     ToggleToolsPanelWarpDrive,
     ToggleToolsPanelConversationHistory,
+    ToggleToolsPanelNotes,
     SetEnforceMinimumContrast(EnforceMinimumContrast),
     OpenUrl(String),
     ToggleFocusPaneOnHover,
@@ -639,6 +649,12 @@ impl TypedActionView for AppearanceSettingsPageView {
             ToggleToolsPanelGlobalSearch => {
                 CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
                     report_if_error!(settings.show_global_search.toggle_and_save_value(ctx));
+                });
+                ctx.notify();
+            }
+            ToggleToolsPanelNotes => {
+                CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings.show_notes.toggle_and_save_value(ctx));
                 });
                 ctx.notify();
             }
@@ -1430,6 +1446,9 @@ impl AppearanceSettingsPageView {
             tools_panel_widgets.push(Box::new(ToolsPanelGlobalSearchWidget::default()));
         }
         tools_panel_widgets.push(Box::new(ToolsPanelWarpDriveWidget::default()));
+        if cfg!(feature = "local_fs") {
+            tools_panel_widgets.push(Box::new(ToolsPanelNotesWidget::default()));
+        }
         if !tools_panel_widgets.is_empty() {
             categories.push(Category::new("Tools panel", tools_panel_widgets));
         }
@@ -3682,6 +3701,44 @@ impl SettingsWidget for ToolsPanelGlobalSearchWidget {
                 })
                 .finish(),
             Some("Show the global file search tab in the tools panel.".to_string()),
+        )
+    }
+}
+
+#[derive(Default)]
+struct ToolsPanelNotesWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for ToolsPanelNotesWidget {
+    type View = AppearanceSettingsPageView;
+
+    fn search_terms(&self) -> &str {
+        "tools panel tabs notes todo to-do tasks checklist daily left panel visibility"
+    }
+
+    fn render(
+        &self,
+        _view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        render_body_item::<AppearancePageAction>(
+            "Notes".to_string(),
+            None,
+            LocalOnlyIconState::Hidden,
+            ToggleState::Enabled,
+            appearance,
+            appearance
+                .ui_builder()
+                .switch(self.switch_state.clone())
+                .check(*CodeSettings::as_ref(app).show_notes)
+                .build()
+                .on_click(|evt_ctx, _app, _v2f| {
+                    evt_ctx.dispatch_typed_action(AppearancePageAction::ToggleToolsPanelNotes);
+                })
+                .finish(),
+            Some("Show the Notes daily todo list tab in the tools panel.".to_string()),
         )
     }
 }
