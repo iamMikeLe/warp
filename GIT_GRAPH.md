@@ -52,9 +52,13 @@ branch off the same base:
 A tools-panel tab (the calendar-check icon) for a daily todo list, so the day's goals sit next to
 the terminal:
 
-- **Today list:** type a task and press Enter to add it; tick the checkbox to mark it done (it
-  stays on the list, struck through). Double-click a task to edit it; right-click to mark it
-  done, edit, archive, or delete it.
+- **Today list:** type a task's title and press Enter to add it; tick the checkbox to mark it
+  done (it stays on the list, struck through). Right-click to mark it done, edit, archive, or
+  delete it.
+- **Details:** click a task to open it in a resizable area under the list: edit its title and
+  write a description in Warp's notebook editor (headings, lists, code blocks with syntax
+  highlighting, and a "/" menu to insert blocks). Changes save as you type; tasks with a
+  description show a file icon.
 - **Archive:** "Archive done" moves every finished task into a collapsed **Archived** section,
   grouped by the day it was finished. Right-click an archived task to restore or delete it.
 - **Storage:** one list shared by every window, saved on each change to `notes.json` in the app's
