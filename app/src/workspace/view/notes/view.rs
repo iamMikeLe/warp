@@ -32,7 +32,10 @@ use warpui::{
 use super::data::{Task, TaskId};
 use super::model::{NotesEvent, NotesModel};
 use crate::appearance::Appearance;
-use crate::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
+use crate::editor::{
+    EditorOptions, EditorView, EnterAction, EnterSettings, Event as EditorEvent,
+    SingleLineEditorOptions, TextOptions,
+};
 use crate::menu::{Menu, MenuItem, MenuItemFields};
 use crate::notebooks::editor::model::NotebooksEditorModel;
 use crate::notebooks::editor::rich_text_styles;
@@ -53,6 +56,8 @@ pub(crate) enum NotesAction {
     Select(TaskId),
     /// Opens the task's details with the cursor in its title.
     EditTitle(TaskId),
+    /// Shows the description as plain markdown (`true`) or formatted.
+    SetRawDescription(bool),
     CloseDetails,
     OpenMenu {
         id: TaskId,
@@ -79,6 +84,8 @@ pub(crate) struct NotesView {
     new_task_input: ViewHandle<EditorView>,
     title_input: ViewHandle<EditorView>,
     description_editor: ViewHandle<RichTextEditorView>,
+    raw_description_editor: ViewHandle<EditorView>,
+    show_raw_description: bool,
     selected: Option<TaskId>,
     /// The stored description last loaded into or saved from the editor; a different stored
     /// value means another window changed it.
@@ -90,6 +97,8 @@ pub(crate) struct NotesView {
     archive_done_mouse_state: MouseStateHandle,
     archived_header_mouse_state: MouseStateHandle,
     close_details_mouse_state: MouseStateHandle,
+    formatted_mouse_state: MouseStateHandle,
+    raw_mouse_state: MouseStateHandle,
     show_archived: bool,
     scroll_state: ClippedScrollStateHandle,
     detail_resizable_state: ResizableStateHandle,
@@ -133,9 +142,7 @@ impl NotesView {
                         .update(ctx, |model, ctx| model.set_title(id, &title, ctx));
                 }
             }
-            EditorEvent::Enter => me.description_editor.update(ctx, |editor, ctx| {
-                editor.focus(ctx);
-            }),
+            EditorEvent::Enter => me.focus_description(ctx),
             EditorEvent::Escape => me.close_details(ctx),
             _ => {}
         });
@@ -144,6 +151,13 @@ impl NotesView {
         ctx.subscribe_to_view(&description_editor, |me, _, event, ctx| match event {
             EditorViewEvent::Edited => me.save_description(ctx),
             EditorViewEvent::EscapePressed => ctx.focus(&me.new_task_input),
+            _ => {}
+        });
+
+        let raw_description_editor = Self::raw_description_editor(ctx);
+        ctx.subscribe_to_view(&raw_description_editor, |me, _, event, ctx| match event {
+            EditorEvent::Edited(_) => me.save_raw_description(ctx),
+            EditorEvent::Escape => ctx.focus(&me.new_task_input),
             _ => {}
         });
 
@@ -165,6 +179,8 @@ impl NotesView {
             new_task_input,
             title_input,
             description_editor,
+            raw_description_editor,
+            show_raw_description: false,
             selected: None,
             loaded_description: String::new(),
             editor_markdown: String::new(),
@@ -172,6 +188,8 @@ impl NotesView {
             archive_done_mouse_state: MouseStateHandle::default(),
             archived_header_mouse_state: MouseStateHandle::default(),
             close_details_mouse_state: MouseStateHandle::default(),
+            formatted_mouse_state: MouseStateHandle::default(),
+            raw_mouse_state: MouseStateHandle::default(),
             show_archived: false,
             scroll_state: ClippedScrollStateHandle::new(),
             detail_resizable_state: resizable_state_handle(DETAIL_MIN_HEIGHT),
@@ -235,6 +253,31 @@ impl NotesView {
         })
     }
 
+    /// A plain monospace editor showing the description's markdown as stored.
+    fn raw_description_editor(ctx: &mut ViewContext<Self>) -> ViewHandle<EditorView> {
+        let mut text = {
+            let appearance = Appearance::as_ref(ctx);
+            TextOptions::ui_text(Some(appearance.monospace_font_size()), appearance)
+        };
+        text.font_family_override = Some(Appearance::as_ref(ctx).monospace_font_family());
+        ctx.add_view(|ctx| {
+            let mut editor = EditorView::new(
+                EditorOptions {
+                    text,
+                    soft_wrap: true,
+                    enter_settings: EnterSettings {
+                        enter: EnterAction::InsertNewLineIfMultiLine,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ctx,
+            );
+            editor.set_placeholder_text("Markdown", ctx);
+            editor
+        })
+    }
+
     fn on_model_changed(&mut self, ctx: &mut ViewContext<Self>) {
         self.sync_mouse_states(ctx);
         if let Some(id) = self.selected {
@@ -275,13 +318,56 @@ impl NotesView {
         ctx.notify();
     }
 
+    /// Loads `description` into whichever editor is showing.
     fn load_description(&mut self, description: &str, ctx: &mut ViewContext<Self>) {
+        self.loaded_description = description.to_string();
+        if self.show_raw_description {
+            self.raw_description_editor
+                .update(ctx, |editor, ctx| editor.set_buffer_text(description, ctx));
+            return;
+        }
         let model = self.description_editor.as_ref(ctx).model().clone();
         model.update(ctx, |model, ctx| {
             model.reset_with_markdown(description, ctx)
         });
-        self.loaded_description = description.to_string();
         self.editor_markdown = model.as_ref(ctx).markdown(ctx);
+    }
+
+    fn set_raw_description(&mut self, raw: bool, ctx: &mut ViewContext<Self>) {
+        if self.show_raw_description == raw {
+            return;
+        }
+        self.show_raw_description = raw;
+        let Some(task) = self
+            .selected
+            .and_then(|id| self.model.as_ref(ctx).data().task(id).cloned())
+        else {
+            return;
+        };
+        self.load_description(&task.description, ctx);
+        self.focus_description(ctx);
+    }
+
+    fn focus_description(&mut self, ctx: &mut ViewContext<Self>) {
+        if self.show_raw_description {
+            ctx.focus(&self.raw_description_editor);
+        } else {
+            self.description_editor
+                .update(ctx, |editor, ctx| editor.focus(ctx));
+        }
+    }
+
+    fn save_raw_description(&mut self, ctx: &mut ViewContext<Self>) {
+        let Some(id) = self.selected else {
+            return;
+        };
+        let markdown = self.raw_description_editor.as_ref(ctx).buffer_text(ctx);
+        if markdown == self.loaded_description {
+            return;
+        }
+        self.loaded_description = markdown.clone();
+        self.model
+            .update(ctx, |model, ctx| model.set_description(id, &markdown, ctx));
     }
 
     fn save_description(&mut self, ctx: &mut ViewContext<Self>) {
@@ -615,6 +701,50 @@ impl NotesView {
             .finish()
     }
 
+    /// "Formatted | Raw": how the description is shown and edited.
+    fn render_mode_switch(&self, appearance: &Appearance) -> Box<dyn Element> {
+        let theme = appearance.theme();
+        let segment = |label: &str, raw: bool, state: MouseStateHandle| {
+            let active = self.show_raw_description == raw;
+            let font_color = if active {
+                theme.active_ui_text_color()
+            } else {
+                theme.nonactive_ui_text_color()
+            };
+            appearance
+                .ui_builder()
+                .button(ButtonVariant::Text, state)
+                .with_text_label(label.to_string())
+                .with_style(UiComponentStyles {
+                    height: Some(22.),
+                    padding: Some(Coords {
+                        left: 6.,
+                        right: 6.,
+                        ..Default::default()
+                    }),
+                    font_color: Some(font_color.into()),
+                    background: active.then(|| internal_colors::fg_overlay_3(theme).into()),
+                    border_radius: Some(CornerRadius::with_all(Radius::Pixels(4.))),
+                    ..Default::default()
+                })
+                .build()
+                .on_click(move |ctx, _, _| {
+                    ctx.dispatch_typed_action(NotesAction::SetRawDescription(raw))
+                })
+                .finish()
+        };
+        Flex::row()
+            .with_cross_axis_alignment(CrossAxisAlignment::Center)
+            .with_spacing(2.)
+            .with_child(segment(
+                "Formatted",
+                false,
+                self.formatted_mouse_state.clone(),
+            ))
+            .with_child(segment("Raw", true, self.raw_mouse_state.clone()))
+            .finish()
+    }
+
     /// The details area under the list; drag its top edge to resize it.
     fn render_details(&self, appearance: &Appearance) -> Box<dyn Element> {
         let theme = appearance.theme();
@@ -632,8 +762,18 @@ impl NotesView {
             .with_child(
                 Expanded::new(1.0, text_input(self.title_input.clone(), appearance)).finish(),
             )
-            .with_child(Container::new(close).with_margin_left(6.).finish())
+            .with_child(
+                Container::new(self.render_mode_switch(appearance))
+                    .with_margin_left(6.)
+                    .finish(),
+            )
+            .with_child(Container::new(close).with_margin_left(2.).finish())
             .finish();
+        let description = if self.show_raw_description {
+            ChildView::new(&self.raw_description_editor).finish()
+        } else {
+            ChildView::new(&self.description_editor).finish()
+        };
         let details = Flex::column()
             .with_child(
                 Container::new(title_row)
@@ -645,8 +785,9 @@ impl NotesView {
             .with_child(
                 Expanded::new(
                     1.0,
-                    Container::new(ChildView::new(&self.description_editor).finish())
+                    Container::new(description)
                         .with_horizontal_padding(12.)
+                        .with_padding_bottom(8.)
                         .finish(),
                 )
                 .finish(),
@@ -813,14 +954,14 @@ impl TypedActionView for NotesView {
                     self.close_details(ctx);
                 } else {
                     self.select(*id, ctx);
-                    self.description_editor
-                        .update(ctx, |editor, ctx| editor.focus(ctx));
+                    self.focus_description(ctx);
                 }
             }
             NotesAction::EditTitle(id) => {
                 self.select(*id, ctx);
                 ctx.focus(&self.title_input);
             }
+            NotesAction::SetRawDescription(raw) => self.set_raw_description(*raw, ctx),
             NotesAction::CloseDetails => self.close_details(ctx),
             NotesAction::OpenMenu { id, x, y } => self.open_menu(*id, vec2f(*x, *y), ctx),
             NotesAction::Delete(id) => {
