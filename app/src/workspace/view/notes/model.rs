@@ -72,8 +72,13 @@ impl NotesModel {
         self.commit(changed, ctx);
     }
 
-    pub fn edit(&mut self, id: TaskId, text: &str, ctx: &mut ModelContext<Self>) {
-        let changed = self.data.edit(id, text);
+    pub fn set_title(&mut self, id: TaskId, title: &str, ctx: &mut ModelContext<Self>) {
+        let changed = self.data.set_title(id, title);
+        self.commit(changed, ctx);
+    }
+
+    pub fn set_description(&mut self, id: TaskId, description: &str, ctx: &mut ModelContext<Self>) {
+        let changed = self.data.set_description(id, description);
         self.commit(changed, ctx);
     }
 
@@ -115,7 +120,8 @@ fn read(path: &Path) -> Result<NotesData, String> {
 }
 
 /// Writes through a temporary file and a rename so a crash mid-write can't truncate the notes.
-/// The file is a few kilobytes, so writing on the main thread is cheap.
+/// The file is plain text of at most a few hundred kilobytes, so writing it on the main thread on
+/// every edit stays cheap.
 fn write(path: &Path, data: &NotesData) -> Result<(), String> {
     let json = serde_json::to_string_pretty(data).map_err(|err| err.to_string())?;
     if let Some(dir) = path.parent() {
