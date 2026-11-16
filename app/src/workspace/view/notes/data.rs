@@ -8,7 +8,11 @@ pub(crate) type TaskId = u64;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Task {
     pub id: TaskId,
-    pub text: String,
+    #[serde(alias = "text")]
+    pub title: String,
+    /// Markdown notes for the task; empty when it has none.
+    #[serde(default)]
+    pub description: String,
     /// The local date the task was ticked off; `None` while it is still open.
     pub done_on: Option<NaiveDate>,
     pub archived: bool,
@@ -28,17 +32,18 @@ pub(crate) struct NotesData {
 }
 
 impl NotesData {
-    /// Appends a task unless `text` is blank; returns the new task's id.
-    pub fn add(&mut self, text: &str) -> Option<TaskId> {
-        let text = text.trim();
-        if text.is_empty() {
+    /// Appends a task unless `title` is blank; returns the new task's id.
+    pub fn add(&mut self, title: &str) -> Option<TaskId> {
+        let title = title.trim();
+        if title.is_empty() {
             return None;
         }
         let id = self.next_id;
         self.next_id += 1;
         self.tasks.push(Task {
             id,
-            text: text.to_string(),
+            title: title.to_string(),
+            description: String::new(),
             done_on: None,
             archived: false,
         });
@@ -55,13 +60,18 @@ impl NotesData {
         })
     }
 
-    /// Replaces the task's text; a blank `text` leaves it unchanged.
-    pub fn edit(&mut self, id: TaskId, text: &str) -> bool {
-        let text = text.trim();
-        if text.is_empty() {
+    /// Replaces the task's title; returns false when `title` is blank or unchanged.
+    pub fn set_title(&mut self, id: TaskId, title: &str) -> bool {
+        let title = title.trim();
+        if title.is_empty() {
             return false;
         }
-        self.with_task(id, |task| task.text = text.to_string())
+        self.update_if_changed(id, |task| &mut task.title, title)
+    }
+
+    /// Replaces the task's markdown description; returns false when it is unchanged.
+    pub fn set_description(&mut self, id: TaskId, description: &str) -> bool {
+        self.update_if_changed(id, |task| &mut task.description, description)
     }
 
     pub fn delete(&mut self, id: TaskId) -> bool {
@@ -117,6 +127,23 @@ impl NotesData {
 
     pub fn task(&self, id: TaskId) -> Option<&Task> {
         self.tasks.iter().find(|task| task.id == id)
+    }
+
+    fn update_if_changed(
+        &mut self,
+        id: TaskId,
+        field: impl FnOnce(&mut Task) -> &mut String,
+        value: &str,
+    ) -> bool {
+        let Some(task) = self.tasks.iter_mut().find(|task| task.id == id) else {
+            return false;
+        };
+        let field = field(task);
+        if field == value {
+            return false;
+        }
+        *field = value.to_string();
+        true
     }
 
     fn with_task(&mut self, id: TaskId, update: impl FnOnce(&mut Task)) -> bool {

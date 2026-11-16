@@ -7,7 +7,7 @@ fn day(d: u32) -> NaiveDate {
 }
 
 fn active_texts(data: &NotesData) -> Vec<&str> {
-    data.active().map(|task| task.text.as_str()).collect()
+    data.active().map(|task| task.title.as_str()).collect()
 }
 
 #[test]
@@ -40,12 +40,34 @@ fn toggle_done_records_the_day_and_reopens() {
 }
 
 #[test]
-fn edit_ignores_blank_text() {
+fn set_title_ignores_blank_and_unchanged_titles() {
     let mut data = NotesData::default();
     let id = data.add("a").unwrap();
-    assert!(!data.edit(id, "  "));
-    assert!(data.edit(id, " b "));
-    assert_eq!(data.task(id).unwrap().text, "b");
+    assert!(!data.set_title(id, "  "));
+    assert!(!data.set_title(id, " a "));
+    assert!(data.set_title(id, " b "));
+    assert_eq!(data.task(id).unwrap().title, "b");
+}
+
+#[test]
+fn set_description_reports_only_real_changes() {
+    let mut data = NotesData::default();
+    let id = data.add("a").unwrap();
+    assert_eq!(data.task(id).unwrap().description, "");
+    let markdown = "Notes\n\n```rust\nfn main() {}\n```\n";
+    assert!(data.set_description(id, markdown));
+    assert!(!data.set_description(id, markdown));
+    assert_eq!(data.task(id).unwrap().description, markdown);
+    assert!(!data.set_description(99, "x"));
+}
+
+#[test]
+fn loads_tasks_saved_before_descriptions_existed() {
+    let json = r#"{"next_id":1,"tasks":[{"id":0,"text":"old","done_on":null,"archived":false}]}"#;
+    let data: NotesData = serde_json::from_str(json).unwrap();
+    let task = data.task(0).unwrap();
+    assert_eq!(task.title, "old");
+    assert_eq!(task.description, "");
 }
 
 #[test]
@@ -90,7 +112,7 @@ fn archived_groups_newest_day_first_with_open_tasks_last() {
     let groups: Vec<(Option<NaiveDate>, Vec<&str>)> = data
         .archived_by_day()
         .into_iter()
-        .map(|(day, tasks)| (day, tasks.iter().map(|t| t.text.as_str()).collect()))
+        .map(|(day, tasks)| (day, tasks.iter().map(|t| t.title.as_str()).collect()))
         .collect();
     assert_eq!(
         groups,
@@ -108,6 +130,7 @@ fn round_trips_through_json() {
     let id = data.add("a").unwrap();
     data.add("b");
     data.toggle_done(id, day(16));
+    data.set_description(id, "- [ ] sub-step\n");
     data.archive_done();
 
     let json = serde_json::to_string(&data).unwrap();
