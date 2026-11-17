@@ -9,10 +9,6 @@ app.
 > Unofficial fork, not affiliated with Warp. For Warp itself, see
 > [warpdotdev/warp](https://github.com/warpdotdev/warp).
 
-<!-- Screenshots: add images to docs/screenshots/ and uncomment.
-![Git Graph](docs/screenshots/git-graph.png)
--->
-
 ## What this fork adds
 
 All of these live in Warp's tools panel and can be shown, hidden and reordered from Settings.
@@ -20,6 +16,8 @@ All of these live in Warp's tools panel and can be shown, hidden and reordered f
 ### Git Graph
 
 Commit history without leaving the terminal.
+
+![Git Graph: commit lanes with branch labels, commit details, and a file diff](images/gitgraph.png)
 
 - A lane-based commit graph with resizable **Branch / Tag | Graph | Commit message** columns and
   author avatars as graph nodes.
@@ -31,11 +29,11 @@ Commit history without leaving the terminal.
 - Auto-refresh when the repository changes, a branch filter, and a picker for folders with
   several repositories.
 
-<!-- ![Worktrees panel](docs/screenshots/worktrees.png) -->
-
 ### Worktrees
 
 For agent-heavy workflows where several git worktrees branch off the same base.
+
+![Worktrees: a repository's worktrees nested under the branches they came from](images/worktree.png)
 
 - Every worktree of the repository hangs under the branch it was created from, read from the
   branch's reflog.
@@ -43,11 +41,11 @@ For agent-heavy workflows where several git worktrees branch off the same base.
   sessions running in it with their state (working, needs you, idle).
 - Click a card to open a terminal in that worktree.
 
-<!-- ![Notes panel](docs/screenshots/notes.png) -->
-
 ### Notes
 
 A daily todo list next to the terminal.
+
+![Notes: today's tasks, the archive, and a task's rich-text description](images/notes.png)
 
 - Add tasks, tick them off, and move finished ones to an archive grouped by the day they were
   done.
