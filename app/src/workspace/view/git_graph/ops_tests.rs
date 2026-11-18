@@ -676,3 +676,76 @@ fn commit_sends_summary_and_optional_description_as_messages() {
     assert_eq!(empty.confirm_message(), None);
     assert!(!empty.is_staging());
 }
+
+#[test]
+fn discard_file_picks_the_command_for_each_side() {
+    let discard = |side| GitWriteOp::DiscardFile {
+        path: "--force".into(),
+        side,
+    };
+    assert_eq!(
+        discard(DiscardSide::WorkingTree).args(),
+        [
+            "--literal-pathspecs",
+            "restore",
+            "--worktree",
+            "--",
+            "--force"
+        ]
+    );
+    assert_eq!(
+        discard(DiscardSide::Untracked).args(),
+        ["--literal-pathspecs", "clean", "-f", "-q", "--", "--force"]
+    );
+    assert_eq!(
+        discard(DiscardSide::StagedAndWorkingTree).args(),
+        [
+            "--literal-pathspecs",
+            "restore",
+            "--source=HEAD",
+            "--staged",
+            "--worktree",
+            "--",
+            "--force"
+        ]
+    );
+    let op = discard(DiscardSide::Untracked);
+    assert!(op.validate().is_ok());
+    assert!(op.confirm_message().is_some());
+    assert!(op.is_staging());
+    assert!(
+        GitWriteOp::DiscardFile {
+            path: String::new(),
+            side: DiscardSide::WorkingTree,
+        }
+        .validate()
+        .is_err()
+    );
+}
+
+#[test]
+fn discard_side_follows_the_entry() {
+    let file = |status, staged| ChangedFile {
+        path: "a.rs".into(),
+        additions: 0,
+        deletions: 0,
+        status,
+        staged,
+    };
+    assert_eq!(
+        DiscardSide::for_file(&file(FileStatus::Added, false)),
+        DiscardSide::Untracked
+    );
+    assert_eq!(
+        DiscardSide::for_file(&file(FileStatus::Modified, false)),
+        DiscardSide::WorkingTree
+    );
+    assert_eq!(
+        DiscardSide::for_file(&file(FileStatus::Deleted, false)),
+        DiscardSide::WorkingTree
+    );
+    assert_eq!(
+        DiscardSide::for_file(&file(FileStatus::Added, true)),
+        DiscardSide::StagedAndWorkingTree
+    );
+}

@@ -59,7 +59,7 @@ use super::columns::{self, ColumnWidths};
 use super::data::{BranchRef, ChangedFile, CommitDetail, CommitNode, FileStatus, RefKind};
 use super::layout::{GraphLayout, build_layout};
 use super::menu::{DEFAULT_PUSH_REMOTE, MenuKind, PromptKind, build_menu};
-use super::ops::{GitWriteOp, ResetMode, archive_format_from_path};
+use super::ops::{DiscardSide, GitWriteOp, ResetMode, archive_format_from_path};
 use crate::appearance::Appearance;
 use crate::code::editor::{add_color, remove_color};
 use crate::editor::{
@@ -144,6 +144,8 @@ pub(crate) enum GitGraphAction {
     UnstageFile(usize),
     StageAll,
     UnstageAll,
+    /// Discard the Nth file's uncommitted change of the uncommitted detail, after a confirmation.
+    DiscardFile(usize),
     /// Commit the staged changes with the commit box's summary and description.
     Commit,
     /// Switch to the Nth repository in the discovered list (dispatched by the
@@ -435,6 +437,8 @@ pub(crate) struct GitGraphView {
     detail_scroll_state: ClippedScrollStateHandle,
     /// Mouse state of the refresh button.
     refresh_mouse_state: MouseStateHandle,
+    stash_mouse_state: MouseStateHandle,
+    pop_stash_mouse_state: MouseStateHandle,
     /// Whether more commits might be loadable (assumed true if the last page
     /// came back full).
     has_more: bool,
@@ -541,6 +545,8 @@ pub(crate) struct GitGraphView {
     /// Number of uncommitted changed files in the working tree (0 = clean). When
     /// > 0, the graph shows a synthetic "Uncommitted Changes (N)" row at the top.
     uncommitted_count: usize,
+    /// Number of stashes in the repo, counted even when the graph hides them; enables Pop.
+    stash_count: usize,
     /// Whether the uncommitted row is the currently selected detail target
     /// (mutually exclusive with `selected`, which holds a commit index).
     uncommitted_selected: bool,
@@ -765,6 +771,8 @@ impl GitGraphView {
             commit_scroll_state: ScrollStateHandle::default(),
             detail_scroll_state: ClippedScrollStateHandle::new(),
             refresh_mouse_state: MouseStateHandle::default(),
+            stash_mouse_state: MouseStateHandle::default(),
+            pop_stash_mouse_state: MouseStateHandle::default(),
             has_more: false,
             loading_more: false,
             visible_range_sender,
@@ -809,6 +817,7 @@ impl GitGraphView {
             op_error: None,
             op_error_dismiss_mouse_state: MouseStateHandle::default(),
             uncommitted_count: 0,
+            stash_count: 0,
             uncommitted_selected: false,
             #[cfg(feature = "local_fs")]
             last_visible_range: 0..0,
@@ -1470,19 +1479,17 @@ impl GitGraphView {
                     // `has_more` is decided by the raw page size, before stashes
                     // are mixed in (they don't count toward pagination).
                     let has_more = commits.len() == COMMIT_PAGE_SIZE;
+                    let stashes = super::data::load_stashes(&dir).await.unwrap_or_default();
+                    let stash_count = stashes.len();
                     // Attach stashes directly above their (loaded) base commits.
-                    let stashes = if show_stashes {
-                        super::data::load_stashes(&dir).await.unwrap_or_default()
-                    } else {
-                        Vec::new()
-                    };
+                    let stashes = if show_stashes { stashes } else { Vec::new() };
                     let commits = super::data::place_stashes(commits, &stashes);
                     // Bundle the cheap status query so the uncommitted row lands
                     // together with the first page (no second flash).
                     let uncommitted = super::data::load_working_tree_status(&dir)
                         .await
                         .unwrap_or(0);
-                    Ok::<_, anyhow::Error>((commits, stashes, has_more, uncommitted))
+                    Ok::<_, anyhow::Error>((commits, stashes, stash_count, has_more, uncommitted))
                 },
                 move |view, result, ctx| {
                     #[cfg(not(feature = "local_fs"))]
@@ -1492,7 +1499,7 @@ impl GitGraphView {
                         return;
                     }
                     match result {
-                        Ok((commits, stashes, has_more, uncommitted)) => {
+                        Ok((commits, stashes, stash_count, has_more, uncommitted)) => {
                             // Snapshot the user's place from the outgoing list
                             // NOW — at landing time — so a selection made while
                             // this reload was in flight is what gets restored
@@ -1512,6 +1519,7 @@ impl GitGraphView {
                                 };
                             view.has_more = has_more;
                             view.uncommitted_count = uncommitted;
+                            view.stash_count = stash_count;
                             view.layout = Arc::new(build_layout(&commits, uncommitted > 0));
                             view.row_mouse_states = row_mouse_states(view.layout.rows.len());
                             view.commits = Arc::new(commits);
@@ -1556,6 +1564,7 @@ impl GitGraphView {
                             view.row_mouse_states = Arc::new(Vec::new());
                             view.has_more = false;
                             view.uncommitted_count = 0;
+                            view.stash_count = 0;
                             let raw = err.to_string();
                             // When the directory isn't inside any git repo,
                             // `git log` reports "not a git repository"; this
@@ -1957,6 +1966,18 @@ impl GitGraphView {
         match &self.detail {
             DetailState::Loaded(detail) if self.uncommitted_selected => {
                 detail.files.get(index).map(|f| f.path.clone())
+            }
+            _ => None,
+        }
+    }
+
+    fn discard_file_op(&self, index: usize) -> Option<GitWriteOp> {
+        match &self.detail {
+            DetailState::Loaded(detail) if self.uncommitted_selected => {
+                detail.files.get(index).map(|file| GitWriteOp::DiscardFile {
+                    path: file.path.clone(),
+                    side: DiscardSide::for_file(file),
+                })
             }
             _ => None,
         }
@@ -2368,13 +2389,39 @@ impl GitGraphView {
         })
         .finish();
 
+        let mut right = Flex::row().with_cross_axis_alignment(CrossAxisAlignment::Center);
+        if FeatureFlag::GitGraphWrite.is_enabled() && matches!(self.state, LoadState::Loaded) {
+            let pop = GitGraphAction::BeginWriteOp(GitWriteOp::StashPop {
+                selector: "stash@{0}".to_string(),
+            });
+            right = right
+                .with_child(toolbar_button(
+                    "Stash",
+                    self.stash_mouse_state.clone(),
+                    (self.uncommitted_count > 0).then_some(GitGraphAction::PromptStash),
+                    appearance,
+                ))
+                .with_child(
+                    Container::new(toolbar_button(
+                        "Pop",
+                        self.pop_stash_mouse_state.clone(),
+                        (self.stash_count > 0).then_some(pop),
+                        appearance,
+                    ))
+                    .with_margin_left(4.)
+                    .with_margin_right(6.)
+                    .finish(),
+                );
+        }
+        right = right.with_child(refresh);
+
         Container::new(
             Flex::row()
                 .with_main_axis_size(MainAxisSize::Max)
                 .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
                 .with_child(left.finish())
-                .with_child(refresh)
+                .with_child(right.finish())
                 .finish(),
         )
         .with_horizontal_padding(12.)
@@ -2945,6 +2992,14 @@ impl GitGraphView {
                                     view.refresh_uncommitted_detail(ctx);
                                     ctx.notify();
                                 }
+                                // Discarding can leave the tree clean, so the uncommitted row
+                                // itself may have to go.
+                                GitWriteOp::DiscardFile { .. } => {
+                                    #[cfg(feature = "local_fs")]
+                                    view.reload_in_place(ctx);
+                                    #[cfg(not(feature = "local_fs"))]
+                                    view.reload(LoadAnchor::Top, ctx);
+                                }
                                 GitWriteOp::Commit { .. } => {
                                     for editor in [
                                         view.commit_summary_editor.clone(),
@@ -3509,6 +3564,50 @@ fn text_line(text: String, appearance: &Appearance, dim: bool) -> Box<dyn Elemen
 /// text animation ([`ShimmeringTextElement`] self-drives its repaint within
 /// paint, around 30fps); appears only when there are more pages, and scrolling
 /// to it triggers the auto-load.
+/// A text button for the header toolbar; `None` for `action` renders it dimmed and inert.
+fn toolbar_button(
+    label: &str,
+    state: MouseStateHandle,
+    action: Option<GitGraphAction>,
+    appearance: &Appearance,
+) -> Box<dyn Element> {
+    let theme = appearance.theme();
+    let enabled = action.is_some();
+    let color: ColorU = if enabled {
+        theme.foreground().into()
+    } else {
+        theme.disabled_text_color(theme.background()).into()
+    };
+    let label = label.to_string();
+    let hoverable = Hoverable::new(state, move |mouse_state| {
+        let mut container = Container::new(
+            Text::new_inline(
+                label.clone(),
+                appearance.ui_font_family(),
+                appearance.ui_font_size(),
+            )
+            .with_color(color)
+            .finish(),
+        )
+        .with_horizontal_padding(8.)
+        .with_vertical_padding(4.)
+        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.)));
+        if enabled
+            && let Some(bg) =
+                ItemHighlightState::new(false, mouse_state).background_color(appearance)
+        {
+            container = container.with_background_color(bg.into_solid());
+        }
+        container.finish()
+    });
+    match action {
+        Some(action) => hoverable
+            .on_click(move |ctx, _, _| ctx.dispatch_typed_action(action.clone()))
+            .finish(),
+        None => hoverable.finish(),
+    }
+}
+
 fn render_loading_more_row(
     appearance: &Appearance,
     shimmer: ShimmeringTextStateHandle,
@@ -4529,6 +4628,11 @@ impl TypedActionView for GitGraphView {
                         GitWriteOp::UnstageFiles { paths }
                     };
                     self.run_op(op, ctx);
+                }
+            }
+            GitGraphAction::DiscardFile(index) => {
+                if let Some(op) = self.discard_file_op(*index) {
+                    self.begin_write_op(op, ctx);
                 }
             }
             GitGraphAction::StageAll => self.run_op(GitWriteOp::StageAll, ctx),

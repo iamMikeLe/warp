@@ -18,13 +18,18 @@ where many branches, worktrees, and stashes pile up quickly.
   `+/-` counts; clicking a file opens a read-only diff, and clicking a parent hash jumps to it
   (loading older history if needed).
 - **Stage and commit:** selecting the WIP row shows unstaged and staged files separately; stage
-  or unstage one file (hover it) or everything at once, open either side's diff, and commit with a
-  summary (with a 72-character guide) and an optional description. Cmd/Ctrl+Enter commits.
+  or unstage one file (hover it) or everything at once, discard one file's changes (after a
+  confirmation; a staged entry discards its staged and unstaged changes, an untracked file is
+  deleted), open either side's diff, and commit with a summary (with a 72-character guide) and an
+  optional description. Cmd/Ctrl+Enter commits.
 - **Navigation:** a repository picker for folders with several repos, a branch filter,
   paging with "load more", and auto-refresh when the repository changes.
 - **Git operations (right-click):** checkout, create/rename/delete branches and tags,
   merge, rebase, reset (soft/mixed/hard), cherry-pick, revert, drop, push/pull, stash
   apply/pop/drop, and archive. Every mutating action asks for confirmation first.
+- **Stash and Pop buttons:** the header has Stash (opens the stash dialog when there are
+  uncommitted changes) and Pop (pops the newest stash after a confirmation, even when stashes are
+  hidden from the graph).
 - **Settings → Git:** show or hide the panel and stashes, opt in to Gravatar pictures, and set
   how deep to scan for repositories. The toggles are also in the Command Palette.
 
