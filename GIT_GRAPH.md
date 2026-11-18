@@ -73,6 +73,18 @@ the terminal:
 - Show, hide, or reorder the tab in Settings → Appearance → Tools panel, or toggle it from the
   Command Palette.
 
+## Pane notes in vertical tabs
+
+- **Add or edit:** right-click a row in the vertical tabs panel → **Add note** / **Edit note**
+  opens a multi-line dialog (Cmd/Ctrl+Enter saves, Escape cancels); **Remove note** deletes it.
+  Notes belong to a pane; in Tabs view a row edits the tab's active pane.
+- **Display:** the note shows under its row on one line, cut off with "…" when too long, and in
+  full under **Note** in the hover details.
+- **Toggle:** "Show notes" in the panel's view options, or "Enable/Disable notes in vertical
+  tabs" in the Command Palette.
+- **Storage:** saved with the session (a `note` column on `pane_leaves`), so notes survive a
+  restart.
+
 ## Credits and what I've added
 
 The Git Graph panel was originally written by [@0xBB2B](https://github.com/0xBB2B)
@@ -115,6 +127,8 @@ I picked it up from there. My work on top of it:
   directly on upstream Warp.
 - **`notes`**: a Notes tools-panel tab with a daily todo list and an archive, based directly on
   upstream Warp.
+- **`pane-notes`**: notes on panes in the vertical tabs panel, shown under each row and in the
+  hover details, based directly on upstream Warp.
 - **`daily`**: everything combined; the build I use day to day.
 
 Rules for working on this fork (for me and for any coding agent working in it):
