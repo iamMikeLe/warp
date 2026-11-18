@@ -395,6 +395,10 @@ pub enum WorkspaceAction {
     ToggleVerticalTabsShowPrLink,
     ToggleVerticalTabsShowDiffStats,
     ToggleVerticalTabsShowDetailsOnHover,
+    ToggleVerticalTabsShowNotes,
+    /// Opens the note dialog for a pane, to add or edit its note.
+    EditPaneNote(PaneViewLocator),
+    RemovePaneNote(PaneViewLocator),
     /// Closes the focused panel. This happens as an explicit action from the user.
     ClosePanel,
     CopyTextToClipboard(String),
@@ -945,6 +949,7 @@ impl WorkspaceAction {
             | ResetTabName(_)
             | RenamePane(_)
             | ResetPaneName(_)
+            | RemovePaneNote(_)
             | RenameActiveTab
             | RenameActivePane
             | SetActiveTabName(_)
@@ -1100,6 +1105,8 @@ impl WorkspaceAction {
             | ToggleVerticalTabsShowPrLink
             | ToggleVerticalTabsShowDiffStats
             | ToggleVerticalTabsShowDetailsOnHover
+            | ToggleVerticalTabsShowNotes
+            | EditPaneNote(_)
             | ToggleWelcomeTips
             | CopyTextToClipboard(_)
             | CopyCurrentPath

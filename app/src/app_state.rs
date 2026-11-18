@@ -130,6 +130,8 @@ pub struct BranchSnapshot {
 pub struct LeafSnapshot {
     pub is_focused: bool,
     pub custom_vertical_tabs_title: Option<String>,
+    /// The user's note on this pane, shown in the vertical tabs panel.
+    pub note: Option<String>,
     pub contents: LeafContents,
 }
 

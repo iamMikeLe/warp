@@ -1613,6 +1613,7 @@ impl PaneGroup {
         pending_ambient_restorations: &mut Vec<(AmbientAgentTaskId, PaneId)>,
     ) -> anyhow::Result<(PaneData, InitialFocus)> {
         let custom_vertical_tabs_title = leaf.custom_vertical_tabs_title.clone();
+        let note = leaf.note.clone();
         let result = match leaf.contents {
             LeafContents::AIDocument(_) => {
                 // Defer AI document pane restoration until after terminal panes are restored.
@@ -2034,14 +2035,19 @@ impl PaneGroup {
             }
         };
 
-        if let (Ok((pane_data, _)), Some(title)) = (&result, custom_vertical_tabs_title.as_deref())
+        if let Ok((pane_data, _)) = &result
             && let PaneNode::Leaf(pane_id) = &pane_data.root
             && let Some(pane) = pane_contents.get(pane_id)
         {
             pane.as_pane()
                 .pane_configuration()
                 .update(ctx, |configuration, ctx| {
-                    configuration.set_custom_vertical_tabs_title(title, ctx);
+                    if let Some(title) = custom_vertical_tabs_title.as_deref() {
+                        configuration.set_custom_vertical_tabs_title(title, ctx);
+                    }
+                    if let Some(note) = note {
+                        configuration.set_note(note, ctx);
+                    }
                 });
         }
 
@@ -2057,6 +2063,7 @@ impl PaneGroup {
     ) -> (PaneData, InitialFocus) {
         for (placeholder_id, leaf) in deferred_panes {
             let custom_vertical_tabs_title = leaf.custom_vertical_tabs_title.clone();
+            let note = leaf.note.clone();
             match leaf.contents {
                 LeafContents::AIDocument(aidocument_snapshot) => {
                     match aidocument_snapshot {
@@ -2105,14 +2112,17 @@ impl PaneGroup {
                             if result.1.focused_pane == Some(placeholder_id) {
                                 result.1.focused_pane = Some(real_id);
                             }
-                            if let Some(title) = custom_vertical_tabs_title.as_deref() {
-                                pane.as_pane().pane_configuration().update(
-                                    ctx,
-                                    |configuration, ctx| {
+                            pane.as_pane().pane_configuration().update(
+                                ctx,
+                                |configuration, ctx| {
+                                    if let Some(title) = custom_vertical_tabs_title.as_deref() {
                                         configuration.set_custom_vertical_tabs_title(title, ctx);
-                                    },
-                                );
-                            }
+                                    }
+                                    if let Some(note) = note.clone() {
+                                        configuration.set_note(note, ctx);
+                                    }
+                                },
+                            );
                             pane_contents.insert(real_id, pane);
                         }
                     }
@@ -2199,19 +2209,22 @@ impl PaneGroup {
                 {
                     snapshot.is_active = true;
                 }
-                let custom_vertical_tabs_title =
-                    self.pane_contents.get(&snapshot_pane_id).and_then(|pane| {
-                        pane.as_pane()
-                            .pane_configuration()
-                            .as_ref(app)
-                            .custom_vertical_tabs_title()
-                            .map(str::to_owned)
-                    });
+                let configuration = self
+                    .pane_contents
+                    .get(&snapshot_pane_id)
+                    .map(|pane| pane.as_pane().pane_configuration().as_ref(app));
+                let custom_vertical_tabs_title = configuration
+                    .and_then(|configuration| configuration.custom_vertical_tabs_title())
+                    .map(str::to_owned);
+                let note = configuration
+                    .and_then(|configuration| configuration.note())
+                    .map(str::to_owned);
                 PaneNodeSnapshot::Leaf(LeafSnapshot {
                     // Focus is tracked against the visible leaf, not the
                     // substituted original.
                     is_focused: *pane_id == self.focused_pane_id(app),
                     custom_vertical_tabs_title,
+                    note,
                     contents,
                 })
             }
@@ -7892,6 +7905,7 @@ impl PaneGroup {
                 event,
                 PaneConfigurationEvent::TitleUpdated
                     | PaneConfigurationEvent::VerticalTabsTitleUpdated
+                    | PaneConfigurationEvent::NoteUpdated
             ) {
                 ctx.emit(Event::PaneTitleUpdated);
             }

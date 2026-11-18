@@ -27,7 +27,7 @@ use warpui::elements::{
     ResizableStateHandle, SavePosition, ScrollTarget, ScrollToPositionMode, ScrollbarWidth,
     Shrinkable, Stack, Text, resizable_state_handle,
 };
-use warpui::fonts::{Properties, Weight};
+use warpui::fonts::{Properties, Style, Weight};
 use warpui::platform::Cursor;
 use warpui::prelude::Align;
 use warpui::text_layout::ClipConfig;
@@ -392,6 +392,7 @@ fn render_pane_row_element(
         title: _,
         subtitle: _,
         custom_vertical_tabs_title: _,
+        note: _,
         display_title_override: _,
         is_focused,
         typed: _,
@@ -728,6 +729,7 @@ pub(super) struct VerticalTabsPanelState {
     show_pr_link_info_tooltip_mouse_state: MouseStateHandle,
     show_diff_stats_mouse_state: MouseStateHandle,
     show_details_on_hover_mouse_state: MouseStateHandle,
+    show_notes_mouse_state: MouseStateHandle,
     panel_right_click_mouse_state: MouseStateHandle,
     pub(super) show_settings_popup: bool,
 }
@@ -766,6 +768,7 @@ impl Default for VerticalTabsPanelState {
             show_pr_link_info_tooltip_mouse_state: Default::default(),
             show_diff_stats_mouse_state: Default::default(),
             show_details_on_hover_mouse_state: Default::default(),
+            show_notes_mouse_state: Default::default(),
             panel_right_click_mouse_state: Default::default(),
             show_settings_popup: false,
         }
@@ -828,6 +831,7 @@ struct PaneProps<'a> {
     title: String,
     subtitle: String,
     custom_vertical_tabs_title: Option<String>,
+    note: Option<String>,
     display_title_override: Option<String>,
     is_focused: bool,
     typed: TypedPane<'a>,
@@ -3526,6 +3530,41 @@ fn render_row_title_line(
         .finish()
 }
 
+/// Adds the pane's note under `content` as one line, truncated with an ellipsis and aligned with
+/// the row's text, when the "Show notes" view option is on.
+fn with_note_line(
+    content: Box<dyn Element>,
+    props: &PaneProps<'_>,
+    app: &AppContext,
+) -> Box<dyn Element> {
+    let Some(note) = props.note.as_deref() else {
+        return content;
+    };
+    if !*TabSettings::as_ref(app).vertical_tabs_show_notes.value() {
+        return content;
+    }
+    let appearance = Appearance::as_ref(app);
+    let theme = appearance.theme();
+    let note = note.split_whitespace().collect::<Vec<_>>().join(" ");
+    Flex::column()
+        .with_main_axis_size(MainAxisSize::Min)
+        .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+        .with_child(content)
+        .with_child(
+            Container::new(
+                Text::new_inline(note, appearance.ui_font_family(), 12.)
+                    .with_clip(ClipConfig::ellipsis())
+                    .with_color(theme.sub_text_color(theme.background()).into())
+                    .with_style(Properties::default().style(Style::Italic))
+                    .finish(),
+            )
+            .with_margin_top(4.)
+            .with_margin_left(VERTICAL_TABS_ICON_SIZE + ICON_WITH_STATUS_GAP)
+            .finish(),
+        )
+        .finish()
+}
+
 fn render_pane_row(props: PaneProps<'_>, app: &AppContext) -> Box<dyn Element> {
     let effective_subtitle = props.subtitle.clone();
     let appearance = Appearance::as_ref(app);
@@ -3626,6 +3665,7 @@ fn render_pane_row(props: PaneProps<'_>, app: &AppContext) -> Box<dyn Element> {
         .with_child(Shrinkable::new(1., text_content).finish())
         .finish();
 
+    let content = with_note_line(content, &props, app);
     render_pane_row_element(props, Padding::uniform(8.), true, content, theme)
 }
 
@@ -3972,6 +4012,7 @@ impl<'a> PaneProps<'a> {
                         .map(str::to_owned)
                 })
                 .flatten(),
+            note: pane_configuration.note().map(str::to_owned),
             display_title_override,
             is_focused: pane_group.focused_pane_id(app) == pane_id,
             typed,
@@ -5036,6 +5077,7 @@ fn render_summary_tab_item(
         .with_child(Shrinkable::new(1., text_col.finish()).finish())
         .finish();
 
+    let content = with_note_line(content, &props, app);
     render_pane_row_element(props, Padding::uniform(8.), true, content, theme)
 }
 
@@ -6269,6 +6311,15 @@ pub(super) fn render_settings_popup(
         appearance,
         theme,
     ));
+    popup_col.add_child(render_show_toggle_option(
+        "Show notes",
+        *TabSettings::as_ref(app).vertical_tabs_show_notes.value(),
+        state.show_notes_mouse_state.clone(),
+        WorkspaceAction::ToggleVerticalTabsShowNotes,
+        None,
+        appearance,
+        theme,
+    ));
     EventHandler::new(
         ConstrainedBox::new(
             Container::new(popup_col.finish())
@@ -7203,6 +7254,32 @@ fn render_detail_section(
         | TypedPane::Other => Empty::new().finish(),
     }
 }
+
+fn render_detail_note_section(note: &str, appearance: &Appearance) -> Box<dyn Element> {
+    let text_colors = detail_sidecar_text_colors(appearance.theme());
+    let section = Flex::column()
+        .with_cross_axis_alignment(CrossAxisAlignment::Start)
+        .with_spacing(DETAIL_SIDECAR_SECTION_GAP)
+        .with_child(render_detail_wrapping_text(
+            "Note",
+            11.,
+            text_colors.sub,
+            Some(Properties::default().weight(Weight::Semibold)),
+            appearance,
+        ))
+        .with_child(render_detail_wrapping_text(
+            note,
+            12.,
+            text_colors.main,
+            None,
+            appearance,
+        ));
+    Container::new(section.finish())
+        .with_padding(Padding::uniform(DETAIL_SIDECAR_SECTION_PADDING))
+        .with_padding_top(0.)
+        .finish()
+}
+
 pub(super) struct DetailSidecarOverlay {
     pub(super) anchor_position_id: String,
     pub(super) offset: pathfinder_geometry::vector::Vector2F,
@@ -7304,6 +7381,9 @@ pub(super) fn render_detail_sidecar(
             );
         }
         sections.add_child(render_detail_section(&props, appearance, app));
+        if let Some(note) = props.note.as_deref() {
+            sections.add_child(render_detail_note_section(note, appearance));
+        }
     }
 
     let scrollable = ConstrainedBox::new(
@@ -7560,6 +7640,7 @@ fn render_compact_pane_row(props: PaneProps<'_>, app: &AppContext) -> Box<dyn El
         .with_child(Shrinkable::new(1., text_col.finish()).finish())
         .finish();
 
+    let content = with_note_line(content, &props, app);
     render_pane_row_element(props, Padding::uniform(8.), true, content, theme)
 }
 

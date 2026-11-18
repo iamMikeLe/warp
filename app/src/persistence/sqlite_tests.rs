@@ -380,6 +380,7 @@ fn test_terminal_window_snapshot(vertical_tabs_panel_open: bool) -> WindowSnapsh
             root: PaneNodeSnapshot::Leaf(LeafSnapshot {
                 is_focused: true,
                 custom_vertical_tabs_title: None,
+                note: None,
                 contents: LeafContents::Terminal(TerminalPaneSnapshot {
                     uuid: vec![u8::from(vertical_tabs_panel_open) + 1],
                     cwd: Some("/tmp".to_string()),
@@ -483,7 +484,7 @@ fn test_sqlite_round_trips_window_team_uid() {
 }
 
 #[test]
-fn test_sqlite_round_trips_custom_vertical_tabs_title() {
+fn test_sqlite_round_trips_custom_vertical_tabs_title_and_note() {
     let tempdir = tempfile::tempdir().expect("tempdir should be created");
     let database_path = tempdir.path().join("warp.sqlite");
     let mut conn = setup_database(&database_path).expect("database should initialize");
@@ -495,6 +496,7 @@ fn test_sqlite_round_trips_custom_vertical_tabs_title() {
                 root: PaneNodeSnapshot::Leaf(LeafSnapshot {
                     is_focused: true,
                     custom_vertical_tabs_title: Some("Production API".to_string()),
+                    note: Some("Deploy after review\nthen tag the release".to_string()),
                     contents: LeafContents::Terminal(TerminalPaneSnapshot {
                         uuid: vec![42],
                         cwd: Some("/tmp".to_string()),
@@ -548,6 +550,7 @@ fn test_sqlite_round_trips_custom_vertical_tabs_title() {
 
     let PaneNodeSnapshot::Leaf(LeafSnapshot {
         custom_vertical_tabs_title,
+        note,
         ..
     }) = &restored.windows[0].tabs[0].root
     else {
@@ -556,6 +559,10 @@ fn test_sqlite_round_trips_custom_vertical_tabs_title() {
     assert_eq!(
         custom_vertical_tabs_title.as_deref(),
         Some("Production API")
+    );
+    assert_eq!(
+        note.as_deref(),
+        Some("Deploy after review\nthen tag the release")
     );
 }
 
@@ -572,6 +579,7 @@ fn test_sqlite_round_trips_code_pane_with_multiple_tabs() {
                 root: PaneNodeSnapshot::Leaf(LeafSnapshot {
                     is_focused: true,
                     custom_vertical_tabs_title: None,
+                    note: None,
                     contents: LeafContents::Code(CodePaneSnapShot::Local {
                         tabs: vec![
                             CodePaneTabSnapshot {
@@ -661,6 +669,7 @@ fn test_sqlite_round_trips_tab_groups() {
         root: PaneNodeSnapshot::Leaf(LeafSnapshot {
             is_focused: true,
             custom_vertical_tabs_title: None,
+            note: None,
             contents: LeafContents::Terminal(TerminalPaneSnapshot {
                 uuid: vec![1],
                 cwd: Some("/tmp/grouped".to_string()),
@@ -689,6 +698,7 @@ fn test_sqlite_round_trips_tab_groups() {
         root: PaneNodeSnapshot::Leaf(LeafSnapshot {
             is_focused: false,
             custom_vertical_tabs_title: None,
+            note: None,
             contents: LeafContents::Terminal(TerminalPaneSnapshot {
                 uuid: vec![2],
                 cwd: Some("/tmp/ungrouped".to_string()),
@@ -785,6 +795,7 @@ fn test_sqlite_round_trips_pinned_state() {
         root: PaneNodeSnapshot::Leaf(LeafSnapshot {
             is_focused: true,
             custom_vertical_tabs_title: None,
+            note: None,
             contents: LeafContents::Terminal(TerminalPaneSnapshot {
                 uuid: vec![10],
                 cwd: Some("/tmp/pinned".to_string()),
@@ -813,6 +824,7 @@ fn test_sqlite_round_trips_pinned_state() {
         root: PaneNodeSnapshot::Leaf(LeafSnapshot {
             is_focused: false,
             custom_vertical_tabs_title: None,
+            note: None,
             contents: LeafContents::Terminal(TerminalPaneSnapshot {
                 uuid: vec![11],
                 cwd: Some("/tmp/unpinned".to_string()),
@@ -841,6 +853,7 @@ fn test_sqlite_round_trips_pinned_state() {
         root: PaneNodeSnapshot::Leaf(LeafSnapshot {
             is_focused: false,
             custom_vertical_tabs_title: None,
+            note: None,
             contents: LeafContents::Terminal(TerminalPaneSnapshot {
                 uuid: vec![12],
                 cwd: Some("/tmp/pinned-group".to_string()),

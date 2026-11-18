@@ -545,6 +545,7 @@ pub mod flags {
         "Match_Notebook_Font_Size_To_Terminal_Font_Size";
     pub const QUIT_WARNING_MODAL: &str = "Quit_Warning_Modal";
     pub const BLOCK_DIVIDERS_CONTEXT_FLAG: &str = "Block_Dividers_Enabled";
+    pub const VERTICAL_TABS_NOTES_CONTEXT_FLAG: &str = "Vertical_Tabs_Notes_Enabled";
 
     pub const LOG_OUT_WARNING_MODAL: &str = "Log_Out_Warning_Modal";
     pub const SMART_SELECT_FLAG: &str = "Smart_Select_Enabled";

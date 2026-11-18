@@ -691,6 +691,8 @@ pub struct PaneConfiguration {
     title: String,
     title_secondary: String,
     custom_vertical_tabs_title: Option<String>,
+    /// The user's note on this pane, shown in the vertical tabs panel and its hover details.
+    note: Option<String>,
     show_active_pane_indicator: bool,
 
     /// If true, we draw an accent border around the pane.
@@ -718,6 +720,7 @@ impl PaneConfiguration {
             title: title.into(),
             title_secondary: String::from(""),
             custom_vertical_tabs_title: None,
+            note: None,
             show_active_pane_indicator: false,
             show_accent_border: false,
             has_open_modal: false,
@@ -736,6 +739,21 @@ impl PaneConfiguration {
 
     pub fn custom_vertical_tabs_title(&self) -> Option<&str> {
         self.custom_vertical_tabs_title.as_deref()
+    }
+
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
+    }
+
+    /// Sets the note, trimming surrounding whitespace; an empty note clears it.
+    pub fn set_note(&mut self, note: impl Into<String>, ctx: &mut ModelContext<Self>) {
+        let note = note.into();
+        let note = note.trim();
+        let note = (!note.is_empty()).then(|| note.to_string());
+        if self.note != note {
+            self.note = note;
+            ctx.emit(PaneConfigurationEvent::NoteUpdated);
+        }
     }
 
     pub fn dim_even_if_focused(&self) -> bool {
@@ -874,6 +892,7 @@ impl PaneConfiguration {
 pub enum PaneConfigurationEvent {
     TitleUpdated,
     VerticalTabsTitleUpdated,
+    NoteUpdated,
     ShowActivePaneIndicatorUpdated,
     RenderElementFnUpdated,
     ShowAccentBorderUpdated,
