@@ -559,6 +559,7 @@ pub mod flags {
     pub const GIT_GRAPH_STASHES_CONTEXT_FLAG: &str = "Git_Graph_Stashes_Enabled";
     pub const GIT_GRAPH_GRAVATAR_CONTEXT_FLAG: &str = "Git_Graph_Gravatar_Enabled";
     pub const RAINBOW_INDENT_CONTEXT_FLAG: &str = "Rainbow_Indent_Enabled";
+    pub const VERTICAL_TABS_NOTES_CONTEXT_FLAG: &str = "Vertical_Tabs_Notes_Enabled";
 
     pub const LOG_OUT_WARNING_MODAL: &str = "Log_Out_Warning_Modal";
     pub const SMART_SELECT_FLAG: &str = "Smart_Select_Enabled";

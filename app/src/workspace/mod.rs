@@ -15,6 +15,7 @@ mod home;
 mod lightbox_view;
 mod native_modal;
 mod one_time_modal_model;
+pub mod pane_note_dialog;
 mod registry;
 pub mod rewind_confirmation_dialog;
 pub mod sync_inputs;
@@ -49,7 +50,7 @@ use crate::channel::{Channel, ChannelState};
 use crate::features::FeatureFlag;
 use crate::palette::PaletteMode;
 use crate::server::telemetry::{AgentModeEntrypoint, PaletteSource};
-use crate::settings_view::{self, SettingsSection, flags};
+use crate::settings_view::{self, SettingsSection, ToggleSettingActionPair, flags};
 use crate::tab::{NewSessionMenuItem, uses_vertical_tabs};
 use crate::util::bindings::{self, CustomAction, cmd_or_ctrl_shift, is_binding_pty_compliant};
 use crate::{code, modal, notebooks, tab_configs};
@@ -84,6 +85,7 @@ pub fn init(app: &mut AppContext) {
     native_modal::init(app);
     lightbox_view::init(app);
     rewind_confirmation_dialog::init(app);
+    pane_note_dialog::init(app);
     delete_conversation_confirmation_dialog::init(app);
     crate::tab_configs::remove_confirmation_dialog::init(app);
     hoa_onboarding::init(app);
@@ -107,6 +109,17 @@ pub fn init(app: &mut AppContext) {
     settings_view::init_actions_from_parent_view(app, &id!("Workspace"), |settings_action| {
         WorkspaceAction::DispatchToSettingsTab(settings_action)
     });
+    if FeatureFlag::VerticalTabs.is_enabled() {
+        ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
+            vec![ToggleSettingActionPair::new(
+                "notes in vertical tabs",
+                WorkspaceAction::ToggleVerticalTabsShowNotes,
+                &id!("Workspace"),
+                flags::VERTICAL_TABS_NOTES_CONTEXT_FLAG,
+            )],
+            app,
+        );
+    }
     global_actions::init_global_actions(app);
     notebooks::init(app);
     code::init(app);

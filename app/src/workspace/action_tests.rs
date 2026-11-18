@@ -80,3 +80,15 @@ fn pane_name_actions_save_workspace_state() {
     // `rename_pane` which mutates `pane_configuration`.
     assert!(WorkspaceAction::RenameActivePane.should_save_app_state_on_action());
 }
+
+#[test]
+fn pane_note_actions_save_only_on_change() {
+    let locator = PaneViewLocator {
+        pane_group_id: EntityId::new(),
+        pane_id: TerminalPaneId::dummy_terminal_pane_id().into(),
+    };
+
+    // Editing opens the dialog; the save happens when the dialog saves the note.
+    assert!(!WorkspaceAction::EditPaneNote(locator).should_save_app_state_on_action());
+    assert!(WorkspaceAction::RemovePaneNote(locator).should_save_app_state_on_action());
+}

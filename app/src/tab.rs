@@ -752,6 +752,7 @@ impl TabData {
             .as_ref(ctx)
             .custom_vertical_tabs_title()
             .is_some();
+        let has_note = configuration.as_ref(ctx).note().is_some();
 
         let mut menu_items = vec![
             MenuItemFields::new(target.rename_label)
@@ -762,6 +763,18 @@ impl TabData {
             menu_items.push(
                 MenuItemFields::new(target.reset_label)
                     .with_on_select_action(WorkspaceAction::ResetPaneName(target.locator))
+                    .into_item(),
+            );
+        }
+        menu_items.push(
+            MenuItemFields::new(if has_note { "Edit note" } else { "Add note" })
+                .with_on_select_action(WorkspaceAction::EditPaneNote(target.locator))
+                .into_item(),
+        );
+        if has_note {
+            menu_items.push(
+                MenuItemFields::new("Remove note")
+                    .with_on_select_action(WorkspaceAction::RemovePaneNote(target.locator))
                     .into_item(),
             );
         }

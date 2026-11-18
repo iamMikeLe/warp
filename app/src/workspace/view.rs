@@ -152,6 +152,7 @@ use super::hoa_onboarding::{
 use super::lightbox_view::{LightboxParams, LightboxView, LightboxViewEvent};
 use super::native_modal::{NativeModal, NativeModalEvent};
 use super::one_time_modal_model::OneTimeModalEvent;
+use super::pane_note_dialog::{PaneNoteDialog, PaneNoteDialogEvent};
 use super::rewind_confirmation_dialog::{
     RewindConfirmationDialog, RewindConfirmationEvent, RewindDialogSource,
 };
@@ -1122,6 +1123,7 @@ pub struct Workspace {
     new_worktree_modal: ModalViewState<Modal<NewWorktreeModal>>,
     close_session_confirmation_dialog: ViewHandle<CloseSessionConfirmationDialog>,
     rewind_confirmation_dialog: ViewHandle<RewindConfirmationDialog>,
+    pane_note_dialog: ViewHandle<PaneNoteDialog>,
     delete_conversation_confirmation_dialog: ViewHandle<DeleteConversationConfirmationDialog>,
     resource_center_view: ViewHandle<ResourceCenterView>,
     command_search_view: ViewHandle<CommandSearchView>,
@@ -1987,6 +1989,79 @@ impl Workspace {
         );
 
         close_session_confirmation_dialog
+    }
+
+    fn build_pane_note_dialog(ctx: &mut ViewContext<Self>) -> ViewHandle<PaneNoteDialog> {
+        let pane_note_dialog = ctx.add_typed_action_view(PaneNoteDialog::new);
+        ctx.subscribe_to_view(&pane_note_dialog, |me, _, event, ctx| {
+            me.handle_pane_note_dialog_event(event, ctx);
+        });
+        pane_note_dialog
+    }
+
+    fn handle_pane_note_dialog_event(
+        &mut self,
+        event: &PaneNoteDialogEvent,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.current_workspace_state.is_pane_note_dialog_open = false;
+        if let PaneNoteDialogEvent::Save { locator, note } = event {
+            self.set_pane_note(*locator, note.clone(), ctx);
+        }
+        self.focus_active_tab(ctx);
+        ctx.notify();
+    }
+
+    fn open_pane_note_dialog(&mut self, locator: PaneViewLocator, ctx: &mut ViewContext<Self>) {
+        let Some(pane_group_view) = self.get_pane_group_view_with_id(locator.pane_group_id) else {
+            log::warn!("Tried to edit the note of a pane in a missing pane group");
+            return;
+        };
+        let Some(note) = pane_group_view
+            .as_ref(ctx)
+            .pane_by_id(locator.pane_id)
+            .map(|pane| {
+                pane.pane_configuration()
+                    .as_ref(ctx)
+                    .note()
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+        else {
+            log::warn!("Tried to edit the note of a missing pane");
+            return;
+        };
+        self.pane_note_dialog.update(ctx, |dialog, ctx| {
+            dialog.open(locator, &note, ctx);
+        });
+        self.current_workspace_state.is_pane_note_dialog_open = true;
+        ctx.focus(&self.pane_note_dialog);
+        ctx.notify();
+    }
+
+    /// Sets the pane's note and saves the session; an empty `note` removes it.
+    fn set_pane_note(
+        &mut self,
+        locator: PaneViewLocator,
+        note: String,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let Some(pane_group_view) = self.get_pane_group_view_with_id(locator.pane_group_id) else {
+            log::warn!("Tried to set the note of a pane in a missing pane group");
+            return;
+        };
+        pane_group_view.update(ctx, |pane_group, ctx| {
+            let Some(pane) = pane_group.pane_by_id(locator.pane_id) else {
+                log::warn!("Tried to set the note of a missing pane");
+                return;
+            };
+            pane.pane_configuration().update(ctx, |configuration, ctx| {
+                configuration.set_note(note, ctx);
+            });
+            ctx.emit(pane_group::Event::AppStateChanged);
+        });
+        ctx.dispatch_global_action("workspace:save_app", ());
+        ctx.notify();
     }
 
     fn build_rewind_confirmation_dialog(
@@ -3107,6 +3182,7 @@ impl Workspace {
 
         let close_session_confirmation_dialog = Self::build_close_session_confirmation_dialog(ctx);
         let rewind_confirmation_dialog = Self::build_rewind_confirmation_dialog(ctx);
+        let pane_note_dialog = Self::build_pane_note_dialog(ctx);
         let delete_conversation_confirmation_dialog =
             Self::build_delete_conversation_confirmation_dialog(ctx);
         let command_search_view =
@@ -3519,6 +3595,7 @@ impl Workspace {
             new_worktree_modal,
             close_session_confirmation_dialog,
             rewind_confirmation_dialog,
+            pane_note_dialog,
             delete_conversation_confirmation_dialog,
             resource_center_view,
             command_search_view,
@@ -3929,6 +4006,7 @@ impl Workspace {
             }
             | TabSettingsChangedEvent::VerticalTabsShowPrLink { .. }
             | TabSettingsChangedEvent::VerticalTabsShowDiffStats { .. }
+            | TabSettingsChangedEvent::VerticalTabsShowNotes { .. }
             | TabSettingsChangedEvent::HideTitleBarSearchBarInVerticalTabs { .. } => {
                 ctx.notify();
             }
@@ -8984,6 +9062,7 @@ impl Workspace {
         let panes_layout = PanesLayout::Snapshot(Box::new(PaneNodeSnapshot::Leaf(LeafSnapshot {
             is_focused: true,
             custom_vertical_tabs_title: None,
+            note: None,
             contents: LeafContents::Settings(SettingsPaneSnapshot::Local {
                 current_page: page.unwrap_or_default(),
                 search_query: search_query.map(|s| s.to_owned()),
@@ -10360,6 +10439,7 @@ impl Workspace {
                     && !self
                         .current_workspace_state
                         .is_any_tab_group_being_renamed()
+                    && !self.current_workspace_state.is_pane_note_dialog_open
                 {
                     self.focus_active_tab(ctx);
                 }
@@ -12904,6 +12984,7 @@ impl Workspace {
             PanesLayout::Snapshot(Box::new(PaneNodeSnapshot::Leaf(LeafSnapshot {
                 is_focused: true,
                 custom_vertical_tabs_title: None,
+                note: None,
                 contents: LeafContents::GetStarted,
             }))),
             Arc::new(HashMap::new()),
@@ -13377,6 +13458,7 @@ impl Workspace {
         let panes_layout = PanesLayout::Snapshot(Box::new(PaneNodeSnapshot::Leaf(LeafSnapshot {
             is_focused: true,
             custom_vertical_tabs_title: None,
+            note: None,
             contents: LeafContents::Notebook(NotebookPaneSnapshot::CloudNotebook {
                 notebook_id: Some(notebook_id),
                 settings: settings.clone(),
@@ -13394,6 +13476,7 @@ impl Workspace {
         let panes_layout = PanesLayout::Snapshot(Box::new(PaneNodeSnapshot::Leaf(LeafSnapshot {
             is_focused: true,
             custom_vertical_tabs_title: None,
+            note: None,
             contents: LeafContents::Workflow(WorkflowPaneSnapshot::CloudWorkflow {
                 workflow_id: Some(workflow_id),
                 settings: settings.clone(),
@@ -13411,6 +13494,7 @@ impl Workspace {
         let panes_layout = PanesLayout::Snapshot(Box::new(PaneNodeSnapshot::Leaf(LeafSnapshot {
             is_focused: true,
             custom_vertical_tabs_title: None,
+            note: None,
             contents: LeafContents::Notebook(NotebookPaneSnapshot::LocalFileNotebook {
                 path: file_path,
             }),
@@ -18903,6 +18987,8 @@ impl Workspace {
                 .is_rewind_confirmation_dialog_open
             {
                 ctx.focus(&self.rewind_confirmation_dialog);
+            } else if self.current_workspace_state.is_pane_note_dialog_open {
+                ctx.focus(&self.pane_note_dialog);
             } else if self.current_workspace_state.is_native_quit_modal_open {
                 ctx.focus(&self.native_modal);
             } else {
@@ -23560,6 +23646,9 @@ impl Workspace {
         if *git_settings.git_graph_gravatar.value() {
             context.set.insert(flags::GIT_GRAPH_GRAVATAR_CONTEXT_FLAG);
         }
+        if *TabSettings::as_ref(app).vertical_tabs_show_notes.value() {
+            context.set.insert(flags::VERTICAL_TABS_NOTES_CONTEXT_FLAG);
+        }
 
         if *block_list_settings.alternate_block_backgrounds.value() {
             context
@@ -24386,6 +24475,8 @@ impl TypedActionView for Workspace {
             ResetTabName(index) => self.clear_tab_name(*index, ctx),
             RenamePane(locator) => self.rename_pane(*locator, ctx),
             ResetPaneName(locator) => self.clear_pane_name(*locator, ctx),
+            EditPaneNote(locator) => self.open_pane_note_dialog(*locator, ctx),
+            RemovePaneNote(locator) => self.set_pane_note(*locator, String::new(), ctx),
             RenameActiveTab => {
                 // In Panes view the tab in a group has no visible top-level name (only pane
                 // rows are shown). Do not allow a tab rename.
@@ -25368,6 +25459,13 @@ impl TypedActionView for Workspace {
                     ),
                     ctx
                 );
+                ctx.notify();
+            }
+            ToggleVerticalTabsShowNotes => {
+                TabSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    let new_value = !*settings.vertical_tabs_show_notes.value();
+                    let _ = settings.vertical_tabs_show_notes.set_value(new_value, ctx);
+                });
                 ctx.notify();
             }
             ToggleVerticalTabsShowDetailsOnHover => {
@@ -28101,6 +28199,18 @@ impl View for Workspace {
         {
             stack.add_positioned_overlay_child(
                 ChildView::new(&self.rewind_confirmation_dialog).finish(),
+                OffsetPositioning::offset_from_parent(
+                    Vector2F::zero(),
+                    ParentOffsetBounds::WindowByPosition,
+                    ParentAnchor::Center,
+                    ChildAnchor::Center,
+                ),
+            );
+        }
+
+        if self.current_workspace_state.is_pane_note_dialog_open {
+            stack.add_positioned_overlay_child(
+                ChildView::new(&self.pane_note_dialog).finish(),
                 OffsetPositioning::offset_from_parent(
                     Vector2F::zero(),
                     ParentOffsetBounds::WindowByPosition,
