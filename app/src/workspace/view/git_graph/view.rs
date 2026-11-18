@@ -56,7 +56,9 @@ use warpui::{AppContext, Entity, SingletonEntity, TypedActionView, View, ViewCon
 #[cfg(feature = "local_fs")]
 use super::auto_refresh;
 use super::columns::{self, ColumnWidths};
-use super::data::{BranchRef, ChangedFile, CommitDetail, CommitNode, FileStatus, RefKind};
+use super::data::{
+    BranchRef, ChangedFile, CommitDetail, CommitNode, FileStatus, HeadStatus, RefKind,
+};
 use super::layout::{GraphLayout, build_layout};
 use super::menu::{DEFAULT_PUSH_REMOTE, MenuKind, PromptKind, build_menu};
 use super::ops::{DiscardSide, GitWriteOp, ResetMode, archive_format_from_path};
@@ -439,6 +441,8 @@ pub(crate) struct GitGraphView {
     refresh_mouse_state: MouseStateHandle,
     stash_mouse_state: MouseStateHandle,
     pop_stash_mouse_state: MouseStateHandle,
+    pull_mouse_state: MouseStateHandle,
+    push_mouse_state: MouseStateHandle,
     /// Whether more commits might be loadable (assumed true if the last page
     /// came back full).
     has_more: bool,
@@ -547,6 +551,7 @@ pub(crate) struct GitGraphView {
     uncommitted_count: usize,
     /// Number of stashes in the repo, counted even when the graph hides them; enables Pop.
     stash_count: usize,
+    head_status: HeadStatus,
     /// Whether the uncommitted row is the currently selected detail target
     /// (mutually exclusive with `selected`, which holds a commit index).
     uncommitted_selected: bool,
@@ -773,6 +778,8 @@ impl GitGraphView {
             refresh_mouse_state: MouseStateHandle::default(),
             stash_mouse_state: MouseStateHandle::default(),
             pop_stash_mouse_state: MouseStateHandle::default(),
+            pull_mouse_state: MouseStateHandle::default(),
+            push_mouse_state: MouseStateHandle::default(),
             has_more: false,
             loading_more: false,
             visible_range_sender,
@@ -818,6 +825,7 @@ impl GitGraphView {
             op_error_dismiss_mouse_state: MouseStateHandle::default(),
             uncommitted_count: 0,
             stash_count: 0,
+            head_status: HeadStatus::default(),
             uncommitted_selected: false,
             #[cfg(feature = "local_fs")]
             last_visible_range: 0..0,
@@ -1489,7 +1497,15 @@ impl GitGraphView {
                     let uncommitted = super::data::load_working_tree_status(&dir)
                         .await
                         .unwrap_or(0);
-                    Ok::<_, anyhow::Error>((commits, stashes, stash_count, has_more, uncommitted))
+                    let head_status = super::data::load_head_status(&dir).await;
+                    Ok::<_, anyhow::Error>((
+                        commits,
+                        stashes,
+                        stash_count,
+                        has_more,
+                        uncommitted,
+                        head_status,
+                    ))
                 },
                 move |view, result, ctx| {
                     #[cfg(not(feature = "local_fs"))]
@@ -1499,7 +1515,7 @@ impl GitGraphView {
                         return;
                     }
                     match result {
-                        Ok((commits, stashes, stash_count, has_more, uncommitted)) => {
+                        Ok((commits, stashes, stash_count, has_more, uncommitted, head_status)) => {
                             // Snapshot the user's place from the outgoing list
                             // NOW — at landing time — so a selection made while
                             // this reload was in flight is what gets restored
@@ -1520,6 +1536,7 @@ impl GitGraphView {
                             view.has_more = has_more;
                             view.uncommitted_count = uncommitted;
                             view.stash_count = stash_count;
+                            view.head_status = head_status;
                             view.layout = Arc::new(build_layout(&commits, uncommitted > 0));
                             view.row_mouse_states = row_mouse_states(view.layout.rows.len());
                             view.commits = Arc::new(commits);
@@ -1565,6 +1582,7 @@ impl GitGraphView {
                             view.has_more = false;
                             view.uncommitted_count = 0;
                             view.stash_count = 0;
+                            view.head_status = HeadStatus::default();
                             let raw = err.to_string();
                             // When the directory isn't inside any git repo,
                             // `git log` reports "not a git repository"; this
@@ -2394,7 +2412,30 @@ impl GitGraphView {
             let pop = GitGraphAction::BeginWriteOp(GitWriteOp::StashPop {
                 selector: "stash@{0}".to_string(),
             });
+            let (pull, push) = sync_ops(&self.head_status);
+            let (ahead, behind) = self
+                .head_status
+                .upstream
+                .as_ref()
+                .map_or((0, 0), |upstream| (upstream.ahead, upstream.behind));
             right = right
+                .with_child(toolbar_button(
+                    &sync_label("Pull", '↓', behind),
+                    self.pull_mouse_state.clone(),
+                    pull.map(GitGraphAction::BeginWriteOp),
+                    appearance,
+                ))
+                .with_child(
+                    Container::new(toolbar_button(
+                        &sync_label("Push", '↑', ahead),
+                        self.push_mouse_state.clone(),
+                        push.map(GitGraphAction::BeginWriteOp),
+                        appearance,
+                    ))
+                    .with_margin_left(4.)
+                    .with_margin_right(10.)
+                    .finish(),
+                )
                 .with_child(toolbar_button(
                     "Stash",
                     self.stash_mouse_state.clone(),
@@ -3564,6 +3605,47 @@ fn text_line(text: String, appearance: &Appearance, dim: bool) -> Box<dyn Elemen
 /// text animation ([`ShimmeringTextElement`] self-drives its repaint within
 /// paint, around 30fps); appears only when there are more pages, and scrolling
 /// to it triggers the auto-load.
+/// The header's Pull and Push ops for the checked-out branch; `None` disables a button. Pull needs
+/// an upstream. Push needs a branch with commits the upstream lacks, or no upstream yet, in which
+/// case it pushes to [`DEFAULT_PUSH_REMOTE`] and starts tracking there.
+pub(super) fn sync_ops(head: &HeadStatus) -> (Option<GitWriteOp>, Option<GitWriteOp>) {
+    let Some(branch) = &head.branch else {
+        return (None, None);
+    };
+    match &head.upstream {
+        Some(upstream) => (
+            Some(GitWriteOp::Pull {
+                remote: upstream.remote.clone(),
+                branch: upstream.branch.clone(),
+            }),
+            (upstream.ahead > 0).then(|| GitWriteOp::PushBranch {
+                remote: upstream.remote.clone(),
+                branch: branch.clone(),
+                force: false,
+                set_upstream: false,
+            }),
+        ),
+        None => (
+            None,
+            Some(GitWriteOp::PushBranch {
+                remote: DEFAULT_PUSH_REMOTE.to_string(),
+                branch: branch.clone(),
+                force: false,
+                set_upstream: true,
+            }),
+        ),
+    }
+}
+
+/// `label` followed by `arrow` and `count` when there's something to pull or push.
+pub(super) fn sync_label(label: &str, arrow: char, count: usize) -> String {
+    if count > 0 {
+        format!("{label} {arrow}{count}")
+    } else {
+        label.to_string()
+    }
+}
+
 /// A text button for the header toolbar; `None` for `action` renders it dimmed and inert.
 fn toolbar_button(
     label: &str,

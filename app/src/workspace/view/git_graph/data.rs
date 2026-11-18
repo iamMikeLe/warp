@@ -592,6 +592,94 @@ pub(crate) async fn load_working_tree_status(repo_root: &Path) -> Result<usize> 
     Ok(parse_status_count(&stdout))
 }
 
+/// The checked-out branch and where it stands against its upstream; drives the header's Pull and
+/// Push buttons.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct HeadStatus {
+    /// `None` on a detached HEAD.
+    pub branch: Option<String>,
+    pub upstream: Option<Upstream>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Upstream {
+    pub remote: String,
+    /// The branch's name on the remote (without `refs/heads/`).
+    pub branch: String,
+    /// Commits on the local branch that the upstream lacks, as of the last fetch.
+    pub ahead: usize,
+    /// Commits on the upstream that the local branch lacks, as of the last fetch.
+    pub behind: usize,
+}
+
+/// Parses `%(upstream:remotename)%x1f%(upstream:remoteref)` into `(remote, branch)`; `None` when
+/// the branch tracks nothing (both fields empty) or tracks a local branch (no remote name).
+pub(crate) fn parse_upstream(stdout: &str) -> Option<(String, String)> {
+    let (remote, remote_ref) = stdout.trim().split_once('\x1f')?;
+    let branch = remote_ref.strip_prefix("refs/heads/")?;
+    (!remote.is_empty() && !branch.is_empty()).then(|| (remote.to_string(), branch.to_string()))
+}
+
+/// Parses `git rev-list --left-right --count HEAD...@{upstream}` (`<ahead>\t<behind>`).
+pub(crate) fn parse_ahead_behind(stdout: &str) -> Option<(usize, usize)> {
+    let mut counts = stdout.split_whitespace().map(str::parse::<usize>);
+    match (counts.next(), counts.next()) {
+        (Some(Ok(ahead)), Some(Ok(behind))) => Some((ahead, behind)),
+        _ => None,
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+pub(crate) async fn load_head_status(repo_root: &Path) -> HeadStatus {
+    let Ok(branch) =
+        warp_util::git::run_git_command(repo_root, &["symbolic-ref", "-q", "--short", "HEAD"])
+            .await
+    else {
+        return HeadStatus::default();
+    };
+    let branch = branch.trim().to_string();
+    if branch.is_empty() {
+        return HeadStatus::default();
+    }
+    let head_ref = format!("refs/heads/{branch}");
+    let upstream = warp_util::git::run_git_command(
+        repo_root,
+        &[
+            "for-each-ref",
+            "--format=%(upstream:remotename)%1f%(upstream:remoteref)",
+            head_ref.as_str(),
+        ],
+    )
+    .await
+    .ok()
+    .and_then(|stdout| parse_upstream(&stdout));
+    let upstream = match upstream {
+        Some((remote, upstream_branch)) => {
+            // Fails when the upstream ref is gone (deleted on the remote and pruned); the counts
+            // then read as zero and a pull reports git's own error.
+            let (ahead, behind) = warp_util::git::run_git_command(
+                repo_root,
+                &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+            )
+            .await
+            .ok()
+            .and_then(|stdout| parse_ahead_behind(&stdout))
+            .unwrap_or((0, 0));
+            Some(Upstream {
+                remote,
+                branch: upstream_branch,
+                ahead,
+                behind,
+            })
+        }
+        None => None,
+    };
+    HeadStatus {
+        branch: Some(branch),
+        upstream,
+    }
+}
+
 /// How a commit changed a file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum FileStatus {

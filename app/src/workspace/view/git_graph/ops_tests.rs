@@ -167,6 +167,7 @@ fn push_branch_force_uses_force_with_lease() {
         remote: "origin".into(),
         branch: "main".into(),
         force: false,
+        set_upstream: false,
     };
     assert_eq!(unforced.args(), vec!["push", "origin", "refs/heads/main"]);
     // Branch force uses --force-with-lease so a moved remote is not clobbered.
@@ -174,6 +175,7 @@ fn push_branch_force_uses_force_with_lease() {
         remote: "origin".into(),
         branch: "main".into(),
         force: true,
+        set_upstream: false,
     };
     assert_eq!(
         forced.args(),
@@ -208,6 +210,7 @@ fn option_state_is_some_only_for_checkbox_capable_ops() {
             remote: "o".into(),
             branch: "b".into(),
             force: true,
+            set_upstream: false,
         }
         .option_state(),
         Some(true)
@@ -505,6 +508,7 @@ fn validate_rejects_option_like_operands() {
             remote: hostile.into(),
             branch: "main".into(),
             force: false,
+            set_upstream: false,
         },
         GitWriteOp::CheckoutBranch {
             branch: hostile.into(),
@@ -748,4 +752,16 @@ fn discard_side_follows_the_entry() {
         DiscardSide::for_file(&file(FileStatus::Added, true)),
         DiscardSide::StagedAndWorkingTree
     );
+}
+
+#[test]
+fn push_branch_set_upstream_adds_u_before_the_remote() {
+    let op = GitWriteOp::PushBranch {
+        remote: "origin".into(),
+        branch: "feat".into(),
+        force: false,
+        set_upstream: true,
+    };
+    assert_eq!(op.args(), vec!["push", "-u", "origin", "refs/heads/feat"]);
+    assert!(op.confirm_message().unwrap().contains("track it"));
 }

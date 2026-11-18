@@ -176,13 +176,15 @@ pub(crate) enum GitWriteOp {
     /// `git branch -d|-D <name>` — delete a local branch; `force` (`-D`) deletes
     /// it even when it isn't fully merged.
     DeleteLocalBranch { name: String, force: bool },
-    /// `git push [--force-with-lease] <remote> <branch>`. `force` uses
+    /// `git push [--force-with-lease] [-u] <remote> <branch>`. `force` uses
     /// `--force-with-lease` (not bare `--force`) so the overwrite is refused if
     /// the remote moved past the position we last fetched, guarding others' work.
     PushBranch {
         remote: String,
         branch: String,
         force: bool,
+        /// Adds `-u`, making `<remote>/<branch>` the branch's upstream.
+        set_upstream: bool,
     },
     /// `git tag -d <name>`.
     DeleteTag { name: String },
@@ -395,10 +397,14 @@ impl GitWriteOp {
                 remote,
                 branch,
                 force,
+                set_upstream,
             } => {
                 let mut args = vec!["push".into()];
                 if *force {
                     args.push("--force-with-lease".into());
+                }
+                if *set_upstream {
+                    args.push("-u".into());
                 }
                 args.push(remote.clone());
                 args.push(qualified_branch(branch));
@@ -659,9 +665,16 @@ impl GitWriteOp {
             GitWriteOp::Pull { remote, branch } => {
                 Some(format!("Pull {remote}/{branch} into the current branch?"))
             }
-            GitWriteOp::PushBranch { remote, branch, .. } => {
-                Some(format!("Push branch \"{branch}\" to \"{remote}\"?"))
-            }
+            GitWriteOp::PushBranch {
+                remote,
+                branch,
+                set_upstream,
+                ..
+            } => Some(if *set_upstream {
+                format!("Push branch \"{branch}\" to \"{remote}\" and track it there?")
+            } else {
+                format!("Push branch \"{branch}\" to \"{remote}\"?")
+            }),
             GitWriteOp::DeleteTag { name } => {
                 Some(format!("Delete tag \"{name}\"? This cannot be undone."))
             }

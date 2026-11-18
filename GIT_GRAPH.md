@@ -27,9 +27,11 @@ where many branches, worktrees, and stashes pile up quickly.
 - **Git operations (right-click):** checkout, create/rename/delete branches and tags,
   merge, rebase, reset (soft/mixed/hard), cherry-pick, revert, drop, push/pull, stash
   apply/pop/drop, and archive. Every mutating action asks for confirmation first.
-- **Stash and Pop buttons:** the header has Stash (opens the stash dialog when there are
-  uncommitted changes) and Pop (pops the newest stash after a confirmation, even when stashes are
-  hidden from the graph).
+- **Header buttons:** Pull and Push for the checked-out branch (with ↓/↑ counts against its
+  upstream as of the last fetch; Refresh fetches), Stash (opens the stash dialog when there are
+  uncommitted changes) and Pop (pops the newest stash, even when stashes are hidden from the
+  graph). Pull and Pop ask for confirmation, as does Push, which starts tracking `origin` for a
+  branch that has no upstream yet.
 - **Settings → Git:** show or hide the panel and stashes, opt in to Gravatar pictures, and set
   how deep to scan for repositories. The toggles are also in the Command Palette.
 
