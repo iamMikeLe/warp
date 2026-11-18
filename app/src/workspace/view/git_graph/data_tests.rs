@@ -639,3 +639,24 @@ fn parse_commit_detail_reads_file_statuses_from_summary() {
     assert_eq!(status("src/kept.rs"), FileStatus::Modified);
     assert_eq!(status("src/moved/x.rs"), FileStatus::Renamed);
 }
+
+#[test]
+fn parse_upstream_reads_remote_and_branch() {
+    assert_eq!(
+        parse_upstream("origin\x1frefs/heads/feature/x\n"),
+        Some(("origin".to_string(), "feature/x".to_string()))
+    );
+    // No upstream configured.
+    assert_eq!(parse_upstream("\x1f\n"), None);
+    // Tracking a local branch: no remote to pull from.
+    assert_eq!(parse_upstream("\x1frefs/heads/main\n"), None);
+    assert_eq!(parse_upstream(""), None);
+}
+
+#[test]
+fn parse_ahead_behind_reads_both_counts() {
+    assert_eq!(parse_ahead_behind("2\t5\n"), Some((2, 5)));
+    assert_eq!(parse_ahead_behind("0\t0"), Some((0, 0)));
+    assert_eq!(parse_ahead_behind("fatal: no upstream"), None);
+    assert_eq!(parse_ahead_behind("3"), None);
+}

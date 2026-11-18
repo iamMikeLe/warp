@@ -475,6 +475,7 @@ fn build_local_branch_menu(
                 remote: DEFAULT_PUSH_REMOTE.to_string(),
                 branch: name.to_string(),
                 force: false,
+                set_upstream: false,
             }),
         ));
     }

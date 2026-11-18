@@ -235,3 +235,64 @@ fn nested_file_tree_rows_lay_out() {
             .finish()
     });
 }
+
+#[test]
+fn sync_ops_follow_the_upstream() {
+    use super::super::data::Upstream;
+
+    let tracking = |ahead, behind| HeadStatus {
+        branch: Some("feat".into()),
+        upstream: Some(Upstream {
+            remote: "origin".into(),
+            branch: "feat".into(),
+            ahead,
+            behind,
+        }),
+    };
+
+    let (pull, push) = sync_ops(&tracking(0, 3));
+    assert_eq!(
+        pull,
+        Some(GitWriteOp::Pull {
+            remote: "origin".into(),
+            branch: "feat".into(),
+        })
+    );
+    assert_eq!(push, None, "nothing to push when not ahead");
+
+    let (_, push) = sync_ops(&tracking(2, 0));
+    assert_eq!(
+        push,
+        Some(GitWriteOp::PushBranch {
+            remote: "origin".into(),
+            branch: "feat".into(),
+            force: false,
+            set_upstream: false,
+        })
+    );
+
+    let untracked = HeadStatus {
+        branch: Some("new".into()),
+        upstream: None,
+    };
+    let (pull, push) = sync_ops(&untracked);
+    assert_eq!(pull, None);
+    assert_eq!(
+        push,
+        Some(GitWriteOp::PushBranch {
+            remote: DEFAULT_PUSH_REMOTE.into(),
+            branch: "new".into(),
+            force: false,
+            set_upstream: true,
+        })
+    );
+
+    assert_eq!(sync_ops(&HeadStatus::default()), (None, None));
+}
+
+#[test]
+fn sync_label_shows_count_only_when_nonzero() {
+    assert_eq!(sync_label("Pull", '↓', 0), "Pull");
+    assert_eq!(sync_label("Pull", '↓', 4), "Pull ↓4");
+    assert_eq!(sync_label("Push", '↑', 1), "Push ↑1");
+}
