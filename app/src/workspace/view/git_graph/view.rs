@@ -2413,46 +2413,67 @@ impl GitGraphView {
                 selector: "stash@{0}".to_string(),
             });
             let (pull, push) = sync_ops(&self.head_status);
+            let (pull_tooltip, push_tooltip) = sync_tooltips(&self.head_status);
             let (ahead, behind) = self
                 .head_status
                 .upstream
                 .as_ref()
                 .map_or((0, 0), |upstream| (upstream.ahead, upstream.behind));
-            right = right
-                .with_child(toolbar_button(
-                    &sync_label("Pull", '↓', behind),
-                    self.pull_mouse_state.clone(),
+            let (stash_tooltip, pop_tooltip) = (
+                if self.uncommitted_count > 0 {
+                    "Stash uncommitted changes"
+                } else {
+                    "Stash (no uncommitted changes)"
+                },
+                if self.stash_count > 0 {
+                    "Pop the latest stash"
+                } else {
+                    "Pop stash (no stashes)"
+                },
+            );
+            for (icon, tooltip, state, action, count) in [
+                (
+                    Icon::ArrowDown,
+                    pull_tooltip,
+                    &self.pull_mouse_state,
                     pull.map(GitGraphAction::BeginWriteOp),
-                    appearance,
-                ))
-                .with_child(
-                    Container::new(toolbar_button(
-                        &sync_label("Push", '↑', ahead),
-                        self.push_mouse_state.clone(),
-                        push.map(GitGraphAction::BeginWriteOp),
-                        appearance,
-                    ))
-                    .with_margin_left(4.)
-                    .with_margin_right(10.)
-                    .finish(),
-                )
-                .with_child(toolbar_button(
-                    "Stash",
-                    self.stash_mouse_state.clone(),
+                    behind,
+                ),
+                (
+                    Icon::ArrowUp,
+                    push_tooltip,
+                    &self.push_mouse_state,
+                    push.map(GitGraphAction::BeginWriteOp),
+                    ahead,
+                ),
+                (
+                    Icon::Save,
+                    stash_tooltip.to_string(),
+                    &self.stash_mouse_state,
                     (self.uncommitted_count > 0).then_some(GitGraphAction::PromptStash),
-                    appearance,
-                ))
-                .with_child(
-                    Container::new(toolbar_button(
-                        "Pop",
-                        self.pop_stash_mouse_state.clone(),
-                        (self.stash_count > 0).then_some(pop),
+                    0,
+                ),
+                (
+                    Icon::Upload,
+                    pop_tooltip.to_string(),
+                    &self.pop_stash_mouse_state,
+                    (self.stash_count > 0).then_some(pop),
+                    0,
+                ),
+            ] {
+                right = right.with_child(
+                    Container::new(header_icon_button(
+                        icon,
+                        tooltip,
+                        state.clone(),
+                        action,
+                        count,
                         appearance,
                     ))
-                    .with_margin_left(4.)
-                    .with_margin_right(6.)
+                    .with_margin_right(2.)
                     .finish(),
                 );
+            }
         }
         right = right.with_child(refresh);
 
@@ -3601,10 +3622,6 @@ fn text_line(text: String, appearance: &Appearance, dim: bool) -> Box<dyn Elemen
         .finish()
 }
 
-/// Renders the "load more" indicator row at the bottom of the list: a pulsing
-/// text animation ([`ShimmeringTextElement`] self-drives its repaint within
-/// paint, around 30fps); appears only when there are more pages, and scrolling
-/// to it triggers the auto-load.
 /// The header's Pull and Push ops for the checked-out branch; `None` disables a button. Pull needs
 /// an upstream. Push needs a branch with commits the upstream lacks, or no upstream yet, in which
 /// case it pushes to [`DEFAULT_PUSH_REMOTE`] and starts tracking there.
@@ -3637,59 +3654,79 @@ pub(super) fn sync_ops(head: &HeadStatus) -> (Option<GitWriteOp>, Option<GitWrit
     }
 }
 
-/// `label` followed by `arrow` and `count` when there's something to pull or push.
-pub(super) fn sync_label(label: &str, arrow: char, count: usize) -> String {
-    if count > 0 {
-        format!("{label} {arrow}{count}")
-    } else {
-        label.to_string()
+/// Tooltips for the header's Pull and Push buttons, matching what [`sync_ops`] enables.
+pub(super) fn sync_tooltips(head: &HeadStatus) -> (String, String) {
+    if head.branch.is_none() {
+        return (
+            "Pull (detached HEAD)".to_string(),
+            "Push (detached HEAD)".to_string(),
+        );
+    }
+    match &head.upstream {
+        Some(upstream) => {
+            let target = format!("{}/{}", upstream.remote, upstream.branch);
+            let pull = match upstream.behind {
+                0 => format!("Pull from {target}"),
+                behind => format!("Pull from {target} ({behind} behind)"),
+            };
+            let push = match upstream.ahead {
+                0 => format!("Push (up to date with {target})"),
+                ahead => format!("Push to {target} ({ahead} ahead)"),
+            };
+            (pull, push)
+        }
+        None => (
+            "Pull (no upstream branch)".to_string(),
+            format!("Push to {DEFAULT_PUSH_REMOTE} and track it"),
+        ),
     }
 }
 
-/// A text button for the header toolbar; `None` for `action` renders it dimmed and inert.
-fn toolbar_button(
-    label: &str,
+/// An icon button for the header toolbar with a hover tooltip; `None` for `action` disables it.
+/// A non-zero `count` (commits to pull or push) shows as a small number after the icon.
+fn header_icon_button(
+    icon: Icon,
+    tooltip: String,
     state: MouseStateHandle,
     action: Option<GitGraphAction>,
+    count: usize,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
-    let theme = appearance.theme();
-    let enabled = action.is_some();
-    let color: ColorU = if enabled {
-        theme.foreground().into()
-    } else {
-        theme.disabled_text_color(theme.background()).into()
-    };
-    let label = label.to_string();
-    let hoverable = Hoverable::new(state, move |mouse_state| {
-        let mut container = Container::new(
-            Text::new_inline(
-                label.clone(),
-                appearance.ui_font_family(),
-                appearance.ui_font_size(),
-            )
-            .with_color(color)
-            .finish(),
-        )
-        .with_horizontal_padding(8.)
-        .with_vertical_padding(4.)
-        .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.)));
-        if enabled
-            && let Some(bg) =
-                ItemHighlightState::new(false, mouse_state).background_color(appearance)
-        {
-            container = container.with_background_color(bg.into_solid());
-        }
-        container.finish()
-    });
-    match action {
-        Some(action) => hoverable
+    let tooltip = appearance.ui_builder().tool_tip(tooltip).build().finish();
+    let mut button = icon_button(appearance, icon, false, state).with_tooltip(move || tooltip);
+    if action.is_none() {
+        button = button.disabled();
+    }
+    let button = button.build();
+    let button = match action {
+        Some(action) => button
             .on_click(move |ctx, _, _| ctx.dispatch_typed_action(action.clone()))
             .finish(),
-        None => hoverable.finish(),
+        None => button.finish(),
+    };
+    if count == 0 {
+        return button;
     }
+    let theme = appearance.theme();
+    Flex::row()
+        .with_cross_axis_alignment(CrossAxisAlignment::Center)
+        .with_child(button)
+        .with_child(
+            Text::new_inline(
+                count.to_string(),
+                appearance.ui_font_family(),
+                appearance.ui_font_size() - 2.,
+            )
+            .with_color(theme.sub_text_color(theme.background()).into())
+            .finish(),
+        )
+        .finish()
 }
 
+/// Renders the "load more" indicator row at the bottom of the list: a pulsing
+/// text animation ([`ShimmeringTextElement`] self-drives its repaint within
+/// paint, around 30fps); appears only when there are more pages, and scrolling
+/// to it triggers the auto-load.
 fn render_loading_more_row(
     appearance: &Appearance,
     shimmer: ShimmeringTextStateHandle,

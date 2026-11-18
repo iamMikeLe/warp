@@ -291,8 +291,40 @@ fn sync_ops_follow_the_upstream() {
 }
 
 #[test]
-fn sync_label_shows_count_only_when_nonzero() {
-    assert_eq!(sync_label("Pull", '↓', 0), "Pull");
-    assert_eq!(sync_label("Pull", '↓', 4), "Pull ↓4");
-    assert_eq!(sync_label("Push", '↑', 1), "Push ↑1");
+fn sync_tooltips_describe_the_upstream() {
+    use super::super::data::Upstream;
+
+    let tracking = |ahead, behind| HeadStatus {
+        branch: Some("feat".into()),
+        upstream: Some(Upstream {
+            remote: "origin".into(),
+            branch: "feat".into(),
+            ahead,
+            behind,
+        }),
+    };
+    assert_eq!(
+        sync_tooltips(&tracking(0, 0)),
+        (
+            "Pull from origin/feat".to_string(),
+            "Push (up to date with origin/feat)".to_string()
+        )
+    );
+    assert_eq!(
+        sync_tooltips(&tracking(2, 3)),
+        (
+            "Pull from origin/feat (3 behind)".to_string(),
+            "Push to origin/feat (2 ahead)".to_string()
+        )
+    );
+    let (pull, push) = sync_tooltips(&HeadStatus {
+        branch: Some("new".into()),
+        upstream: None,
+    });
+    assert_eq!(pull, "Pull (no upstream branch)");
+    assert_eq!(push, format!("Push to {DEFAULT_PUSH_REMOTE} and track it"));
+    assert_eq!(
+        sync_tooltips(&HeadStatus::default()).0,
+        "Pull (detached HEAD)"
+    );
 }
