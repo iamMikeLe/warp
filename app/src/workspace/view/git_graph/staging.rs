@@ -1,5 +1,5 @@
 //! The uncommitted-changes panel: unstaged and staged file lists with per-file and bulk
-//! stage / unstage, and a commit box (summary, description, commit button).
+//! stage / unstage, per-file discard, and a commit box (summary, description, commit button).
 
 use pathfinder_color::ColorU;
 use warp_core::ui::theme::color::internal_colors;
@@ -30,8 +30,15 @@ pub(super) struct StagingMouseStates {
     pub stage_all: MouseStateHandle,
     pub unstage_all: MouseStateHandle,
     pub commit: MouseStateHandle,
-    /// One per file in [`super::data::CommitDetail::files`]: the row and its stage/unstage button.
-    pub rows: Vec<(MouseStateHandle, MouseStateHandle)>,
+    /// One per file in [`super::data::CommitDetail::files`].
+    pub rows: Vec<FileRowMouseStates>,
+}
+
+#[derive(Default, Clone)]
+pub(super) struct FileRowMouseStates {
+    pub row: MouseStateHandle,
+    pub stage: MouseStateHandle,
+    pub discard: MouseStateHandle,
 }
 
 pub(super) struct StagingPanel<'a> {
@@ -117,6 +124,11 @@ impl StagingPanel<'_> {
         appearance: &Appearance,
     ) -> Box<dyn Element> {
         let theme = appearance.theme();
+        let button_color = if staged {
+            theme.foreground().into()
+        } else {
+            theme.accent().into()
+        };
         let header = Flex::row()
             .with_main_axis_size(MainAxisSize::Max)
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -136,7 +148,7 @@ impl StagingPanel<'_> {
                     button_label,
                     button_state,
                     button_action,
-                    !staged,
+                    button_color,
                     appearance,
                 )
             }))
@@ -181,7 +193,7 @@ impl StagingPanel<'_> {
     fn file_row(&self, index: usize, appearance: &Appearance) -> Box<dyn Element> {
         let file = &self.files[index];
         let theme = appearance.theme();
-        let (row_state, button_state) = self.states.rows.get(index).cloned().unwrap_or_default();
+        let states = self.states.rows.get(index).cloned().unwrap_or_default();
         let (dir, name) = match file.path.rsplit_once('/') {
             Some((dir, name)) => (dir.to_string(), name.to_string()),
             None => (String::new(), file.path.clone()),
@@ -193,14 +205,32 @@ impl StagingPanel<'_> {
         let font = appearance.ui_font_family();
         let size = appearance.ui_font_size();
         let status = status_badge(file.status, appearance);
-        let (label, action) = if file.staged {
-            ("Unstage", GitGraphAction::UnstageFile(index))
+        let (label, action, color) = if file.staged {
+            ("Unstage", GitGraphAction::UnstageFile(index), fg)
         } else {
-            ("Stage", GitGraphAction::StageFile(index))
+            (
+                "Stage",
+                GitGraphAction::StageFile(index),
+                theme.accent().into(),
+            )
         };
         let hover_bg = internal_colors::fg_overlay_2(theme);
-        let button = small_button(label, button_state, action, !file.staged, appearance);
-        Hoverable::new(row_state, move |mouse| {
+        let buttons = Flex::row()
+            .with_cross_axis_alignment(CrossAxisAlignment::Center)
+            .with_child(small_button(
+                "Discard",
+                states.discard,
+                GitGraphAction::DiscardFile(index),
+                remove_color(appearance),
+                appearance,
+            ))
+            .with_child(
+                Container::new(small_button(label, states.stage, action, color, appearance))
+                    .with_margin_left(4.)
+                    .finish(),
+            )
+            .finish();
+        Hoverable::new(states.row, move |mouse| {
             let mut row = Flex::row()
                 .with_main_axis_size(MainAxisSize::Max)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -235,7 +265,7 @@ impl StagingPanel<'_> {
                 )
                 .with_child(Expanded::new(1.0, Empty::new().finish()).finish());
             row = if mouse.is_hovered() {
-                row.with_child(button)
+                row.with_child(buttons)
             } else {
                 row.with_child(status)
             };
@@ -364,30 +394,26 @@ pub(super) fn text_input(
         .finish()
 }
 
-/// A compact pill button; `primary` uses the accent color (stage), otherwise neutral (unstage).
+/// A compact pill button with `color` text on a translucent `color` background.
 fn small_button(
     label: &str,
     state: MouseStateHandle,
     action: GitGraphAction,
-    primary: bool,
+    color: ColorU,
     appearance: &Appearance,
 ) -> Box<dyn Element> {
-    let theme = appearance.theme();
-    let accent: ColorU = theme.accent().into();
-    let fg: ColorU = theme.foreground().into();
     let label = label.to_string();
     let font = appearance.ui_font_family();
     let size = appearance.ui_font_size() - 2.;
     Hoverable::new(state, move |mouse| {
-        let base = if primary { accent } else { fg };
         let alpha = if mouse.is_hovered() { 0x44 } else { 0x26 };
         Container::new(
             Text::new_inline(label.clone(), font, size)
-                .with_color(if primary { accent } else { fg })
+                .with_color(color)
                 .with_style(Properties::default().weight(Weight::Semibold))
                 .finish(),
         )
-        .with_background_color(ColorU { a: alpha, ..base })
+        .with_background_color(ColorU { a: alpha, ..color })
         .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.)))
         .with_horizontal_padding(7.)
         .with_vertical_padding(2.)

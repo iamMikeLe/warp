@@ -16,6 +16,8 @@ use std::path::PathBuf;
 #[cfg(not(target_family = "wasm"))]
 use anyhow::Result;
 
+use super::data::{ChangedFile, FileStatus};
+
 /// `git reset` mode (chosen from the "Reset current branch to this Commit"
 /// submenu). Each moves the current branch ref to the target commit; they
 /// differ in what happens to the index and working tree.
@@ -200,6 +202,8 @@ pub(crate) enum GitWriteOp {
     UnstageFiles { paths: Vec<String> },
     /// `git reset -q`: unstages everything.
     UnstageAll,
+    /// Throws away one side of a file's uncommitted change (see [`DiscardSide`]).
+    DiscardFile { path: String, side: DiscardSide },
     /// `git commit -m <summary> [-m <description>]` of the staged changes.
     Commit {
         summary: String,
@@ -213,8 +217,35 @@ pub(crate) enum GitWriteOp {
     },
 }
 
+/// Which uncommitted change of a file [`GitWriteOp::DiscardFile`] throws away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiscardSide {
+    /// `git restore --worktree`: the working tree's changes to a tracked file, back to the index.
+    WorkingTree,
+    /// `git clean -f`: deletes an untracked file.
+    Untracked,
+    /// `git restore --source=HEAD --staged --worktree`: the file's staged *and* unstaged changes,
+    /// back to HEAD (a file new since HEAD is removed).
+    StagedAndWorkingTree,
+}
+
+impl DiscardSide {
+    /// The side discarded for an uncommitted-changes entry. An unstaged added file is untracked:
+    /// it isn't in the index, so only `git clean` removes it.
+    pub(crate) fn for_file(file: &ChangedFile) -> Self {
+        match (file.staged, file.status) {
+            (true, _) => DiscardSide::StagedAndWorkingTree,
+            (false, FileStatus::Added) => DiscardSide::Untracked,
+            (false, FileStatus::Modified | FileStatus::Deleted | FileStatus::Renamed) => {
+                DiscardSide::WorkingTree
+            }
+        }
+    }
+}
+
 impl GitWriteOp {
-    /// Staging and unstaging: quick index updates that refresh only the uncommitted changes.
+    /// Quick updates to the uncommitted changes (staging, unstaging, discarding a file), which
+    /// run without the working overlay.
     pub(crate) fn is_staging(&self) -> bool {
         matches!(
             self,
@@ -222,6 +253,7 @@ impl GitWriteOp {
                 | GitWriteOp::StageAll
                 | GitWriteOp::UnstageFiles { .. }
                 | GitWriteOp::UnstageAll
+                | GitWriteOp::DiscardFile { .. }
         )
     }
 
@@ -415,6 +447,20 @@ impl GitWriteOp {
                 args
             }
             GitWriteOp::UnstageAll => vec!["reset".into(), "-q".into()],
+            GitWriteOp::DiscardFile { path, side } => {
+                let mut args = vec![LITERAL_PATHSPECS.to_string()];
+                let command: &[&str] = match side {
+                    DiscardSide::WorkingTree => &["restore", "--worktree"],
+                    DiscardSide::Untracked => &["clean", "-f", "-q"],
+                    DiscardSide::StagedAndWorkingTree => {
+                        &["restore", "--source=HEAD", "--staged", "--worktree"]
+                    }
+                };
+                args.extend(command.iter().map(|arg| arg.to_string()));
+                args.push("--".into());
+                args.push(path.clone());
+                args
+            }
             GitWriteOp::Commit {
                 summary,
                 description,
@@ -466,7 +512,9 @@ impl GitWriteOp {
             | GitWriteOp::UnstageAll
             | GitWriteOp::Commit { .. } => vec![],
             // Paths follow `--`, where a leading `-` can't be read as an option.
-            GitWriteOp::StageFiles { .. } | GitWriteOp::UnstageFiles { .. } => vec![],
+            GitWriteOp::StageFiles { .. }
+            | GitWriteOp::UnstageFiles { .. }
+            | GitWriteOp::DiscardFile { .. } => vec![],
             GitWriteOp::StashApply { selector }
             | GitWriteOp::StashPop { selector }
             | GitWriteOp::StashDrop { selector } => vec![selector],
@@ -497,6 +545,9 @@ impl GitWriteOp {
                 if paths.is_empty() || paths.iter().any(String::is_empty) =>
             {
                 return Err("No files to stage or unstage.".to_string());
+            }
+            GitWriteOp::DiscardFile { path, .. } if path.is_empty() => {
+                return Err("No file to discard.".to_string());
             }
             _ => {}
         }
@@ -617,6 +668,17 @@ impl GitWriteOp {
             GitWriteOp::PushTag { remote, name, .. } => {
                 Some(format!("Push tag \"{name}\" to \"{remote}\"?"))
             }
+            GitWriteOp::DiscardFile { path, side } => Some(match side {
+                DiscardSide::WorkingTree => {
+                    format!("Discard unstaged changes to \"{path}\"? This cannot be undone.")
+                }
+                DiscardSide::Untracked => {
+                    format!("Delete untracked file \"{path}\"? This cannot be undone.")
+                }
+                DiscardSide::StagedAndWorkingTree => format!(
+                    "Discard all changes to \"{path}\", staged and unstaged? This cannot be undone."
+                ),
+            }),
         }
     }
 
