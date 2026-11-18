@@ -23,7 +23,9 @@ Commit history without leaving the terminal.
   author avatars as graph nodes.
 - Commit details: message, author, changed files with `+/-` counts; click a file for a read-only
   diff.
-- Stage, unstage and commit from the uncommitted-changes row.
+- Stage, unstage, discard and commit from the uncommitted-changes row.
+- Header buttons to pull and push the current branch (with how far it is behind or ahead of its
+  upstream), and to stash and pop changes.
 - Right-click git operations (checkout, branch and tag management, merge, rebase, reset,
   cherry-pick, revert, push/pull, stashes), each confirmed before it runs.
 - Auto-refresh when the repository changes, a branch filter, and a picker for folders with
@@ -55,7 +57,8 @@ A daily todo list next to the terminal.
 
 ### Smaller additions
 
-Reorderable tools-panel buttons, split-pane tools (collapse a pane to a strip, open files beside
+Notes on panes in the vertical tabs panel (shown under each row and on hover), reorderable
+tools-panel buttons, split-pane tools (collapse a pane to a strip, open files beside
 the terminal), whole-word global search, browsing subfolders from the working-directory menu,
 alternating block backgrounds, colored file icons, and two themes (Samurai and Sakura).
 
