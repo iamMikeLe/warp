@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 #
 # Builds a release WarpOss.app for this Mac (OSS channel: Git Graph, Worktrees and the other fork
-# features), signs it with this Mac's own certificate, and wraps it in a drag-to-Applications DMG.
-# For personal use: the app isn't notarized, so on another Mac it needs right-click > Open once.
+# features) and wraps it in a drag-to-Applications DMG. Without --sign the app is signed ad hoc,
+# which only this Mac trusts; with --sign and --notarize it opens normally on any Mac.
 #
-# Usage: script/macos/personal_dmg [--name AppName] [--icon icon.png] [output.dmg]
+# Usage: script/macos/personal_dmg [--name AppName] [--icon icon.png]
+#                                  [--sign "Developer ID Application: ..."] [--notarize profile]
+#                                  [output.dmg]
 #   --name      the app's name in Finder, the Dock and the menu bar (default: WarpOss). Only the
 #               displayed name changes: settings stay in ~/.warp-oss.
 #   --icon      a square PNG (ideally 1024x1024) to use as the app icon
+#   --sign      a Developer ID Application identity from `security find-identity -v -p codesigning`
+#   --notarize  a notarytool keychain profile (`xcrun notarytool store-credentials`); needs --sign
 #   output.dmg  default: ~/Desktop/<AppName>.dmg
 #
 # One-time setup beyond the normal build tools: cargo install --locked cargo-about@0.8.4
@@ -23,6 +27,8 @@ fi
 APP_NAME="WarpOss"
 ICON_PNG=""
 DMG_PATH=""
+SIGN_IDENTITY=""
+NOTARY_PROFILE=""
 while (( $# )); do
   case "$1" in
     --name)
@@ -31,6 +37,14 @@ while (( $# )); do
       ;;
     --icon)
       ICON_PNG="${2:?--icon needs a PNG file}"
+      shift 2
+      ;;
+    --sign)
+      SIGN_IDENTITY="${2:?--sign needs a signing identity}"
+      shift 2
+      ;;
+    --notarize)
+      NOTARY_PROFILE="${2:?--notarize needs a notarytool keychain profile}"
       shift 2
       ;;
     *)
@@ -44,6 +58,10 @@ if [[ ! "$APP_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9\ ._-]*$ ]]; then
   exit 1
 fi
 DMG_PATH="${DMG_PATH:-$HOME/Desktop/$APP_NAME.dmg}"
+if [[ -n "$NOTARY_PROFILE" && -z "$SIGN_IDENTITY" ]]; then
+  echo "--notarize needs --sign: Apple only notarizes apps signed with a Developer ID." >&2
+  exit 1
+fi
 if [[ -n "$ICON_PNG" ]]; then
   if [[ ! -f "$ICON_PNG" ]]; then
     echo "No such icon file: $ICON_PNG" >&2
@@ -68,6 +86,11 @@ trap 'rm -f "$STAMP"; [[ -n "$STAGE" ]] && rm -rf "$STAGE"' EXIT
 # Warp's bundle script ends by copying a DMG that only its own (Warp-certificate) signing path
 # creates, so it exits with an error after a successful self-signed build. Judge success by
 # whether the app was rebuilt instead.
+# The per-target variable is joined with the `target.'cfg(...)'` rustflags in .cargo/config.toml,
+# whereas RUSTFLAGS would replace them. The remap keeps the home directory (and so the username)
+# out of the source paths embedded in the binary.
+TARGET_RUSTFLAGS_VAR="CARGO_TARGET_$(tr '[:lower:]-' '[:upper:]_' <<< "$TARGET")_RUSTFLAGS"
+export "$TARGET_RUSTFLAGS_VAR=--remap-path-prefix=$HOME=~"
 WARP_SKIP_COMMON_SKILLS_INSTALL=1 ./script/bundle --channel oss --selfsign --nouniversal || true
 
 if [[ ! "$APP/Contents/MacOS/warp-oss" -nt "$STAMP" ]]; then
@@ -94,7 +117,17 @@ if [[ -n "$ICON_PNG" ]]; then
   iconutil -c icns "$ICONSET" -o "$STAGED_APP/Contents/Resources/${ICON_FILE%.icns}.icns"
   rm -r "$ICONSET"
 fi
-if [[ "$APP_NAME" != "WarpOss" || -n "$ICON_PNG" ]]; then
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  # Warp's app group is tied to Warp's own team ID, which another team's certificate can't claim.
+  # The app falls back to its regular data directory when the group container is unavailable.
+  ENTITLEMENTS="$STAGE/Entitlements.plist"
+  cp script/Entitlements.plist "$ENTITLEMENTS"
+  plutil -remove 'com\.apple\.security\.application-groups' "$ENTITLEMENTS"
+  codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" \
+    --entitlements "$ENTITLEMENTS" "$STAGED_APP"
+  rm "$ENTITLEMENTS"
+  codesign --verify --deep --strict "$STAGED_APP"
+elif [[ "$APP_NAME" != "WarpOss" || -n "$ICON_PNG" ]]; then
   # Changing the bundle invalidates its signature; sign again the way script/bundle --selfsign
   # does when there's no Apple Development certificate.
   codesign --force --deep --options runtime --sign - \
@@ -102,6 +135,22 @@ if [[ "$APP_NAME" != "WarpOss" || -n "$ICON_PNG" ]]; then
 fi
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG_PATH"
+
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG_PATH"
+fi
+if [[ -n "$NOTARY_PROFILE" ]]; then
+  echo "Submitting $DMG_PATH for notarization (usually a few minutes)..."
+  NOTARY_OUTPUT="$(xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait)"
+  echo "$NOTARY_OUTPUT"
+  if ! grep -q "status: Accepted" <<< "$NOTARY_OUTPUT"; then
+    echo "Notarization failed. See why with:" >&2
+    echo "  xcrun notarytool log <submission id> --keychain-profile $NOTARY_PROFILE" >&2
+    exit 1
+  fi
+  xcrun stapler staple "$DMG_PATH"
+  spctl --assess --type open --context context:primary-signature --verbose "$DMG_PATH"
+fi
 
 echo
 echo "Created $DMG_PATH"

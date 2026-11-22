@@ -179,8 +179,17 @@ script/macos/personal_dmg --name MyTerm --icon my-icon.png   # ...with your own 
 ```
 
 Builds a release WarpOss for this Mac, signs it locally, and packages it
-as a drag-to-Applications DMG. It isn't notarized: on another Mac, right-click the app and choose
-**Open** the first time. Rebuild and reinstall to update.
+as a drag-to-Applications DMG. It isn't notarized, so other Macs block it until it's allowed in
+System Settings → Privacy & Security. Rebuild and reinstall to update.
+
+To share it, sign it with an Apple Developer ID and have Apple notarize it, so it opens on any Mac:
+
+```sh
+xcrun notarytool store-credentials my-notary --apple-id <apple-id> --team-id <team-id>   # once
+script/macos/personal_dmg --sign "Developer ID Application: <Name> (<team-id>)" --notarize my-notary
+```
+
+The build keeps your home directory out of the source paths embedded in the app.
 
 ## Staying up to date with upstream
 
