@@ -17,3 +17,16 @@ fn file_explorer_is_not_an_agent_view_default() {
     assert!(!AgentToolbarItemKind::default_left().contains(&AgentToolbarItemKind::FileExplorer));
     assert!(!AgentToolbarItemKind::default_right().contains(&AgentToolbarItemKind::FileExplorer));
 }
+
+/// Polish Prompt rewrites the CLI agent rich input, so it only belongs to the CLI agent toolbar.
+#[test]
+fn polish_prompt_is_cli_agent_only() {
+    let availability = AgentToolbarItemKind::PolishPrompt.available_in();
+    assert!(availability.is_available_for_cli());
+    assert!(!availability.is_available_for_agent_view());
+    assert!(
+        AgentToolbarItemKind::all_available_for_cli_input()
+            .contains(&AgentToolbarItemKind::PolishPrompt)
+    );
+    assert!(!AgentToolbarItemKind::all_available().contains(&AgentToolbarItemKind::PolishPrompt));
+}
