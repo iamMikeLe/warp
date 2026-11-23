@@ -277,6 +277,10 @@ impl TerminalView {
             UseAgentToolbarEvent::HideRichInput => {
                 self.close_cli_agent_rich_input_and_disable_auto_toggle(ctx);
             }
+            UseAgentToolbarEvent::PolishRichInputPrompt => {
+                #[cfg(not(target_family = "wasm"))]
+                self.polish_cli_agent_rich_input(ctx);
+            }
             UseAgentToolbarEvent::Warpify => {
                 self.hide_use_agent_footer_in_blocklist(ctx);
                 self.handle_action(&TerminalAction::TriggerSubshellBootstrap, ctx);
@@ -1282,6 +1286,9 @@ impl UseAgentToolbar {
             AgentInputFooterEvent::HideRichInput => {
                 ctx.emit(UseAgentToolbarEvent::HideRichInput);
             }
+            AgentInputFooterEvent::PolishRichInputPrompt => {
+                ctx.emit(UseAgentToolbarEvent::PolishRichInputPrompt);
+            }
             // Non-CLI events are handled by Input's subscription, not here.
             _ => {}
         }
@@ -1303,6 +1310,16 @@ impl UseAgentToolbar {
                 ctx.emit(UseAgentToolbarEvent::Dismiss);
             }
         }
+    }
+
+    pub(in crate::terminal) fn set_prompt_polish_in_progress(
+        &mut self,
+        in_progress: bool,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.agent_input_footer.update(ctx, |footer, ctx| {
+            footer.set_prompt_polish_in_progress(in_progress, ctx);
+        });
     }
 
     pub(in crate::terminal) fn notify_and_notify_children(&mut self, ctx: &mut ViewContext<Self>) {
@@ -1382,6 +1399,8 @@ pub enum UseAgentToolbarEvent {
     OpenRichInput,
     /// Hide the rich input editor (same as Escape).
     HideRichInput,
+    /// Rewrite the unsent rich input draft into a well-structured prompt.
+    PolishRichInputPrompt,
     /// User chose to warpify the subshell.
     Warpify,
     /// User chose to use the agent.

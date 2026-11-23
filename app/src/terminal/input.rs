@@ -3002,7 +3002,8 @@ impl Input {
                 | AgentInputFooterEvent::ToggleCodeReviewPane(_)
                 | AgentInputFooterEvent::ToggleFileExplorer(_)
                 | AgentInputFooterEvent::OpenRichInput
-                | AgentInputFooterEvent::HideRichInput => {}
+                | AgentInputFooterEvent::HideRichInput
+                | AgentInputFooterEvent::PolishRichInputPrompt => {}
                 AgentInputFooterEvent::ToggledChipMenu { open } => {
                     me.handle_prompt_event(&PromptDisplayEvent::ToggleMenu { open: *open }, ctx);
                 }

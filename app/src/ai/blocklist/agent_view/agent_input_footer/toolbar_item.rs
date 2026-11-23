@@ -60,6 +60,8 @@ pub enum AgentToolbarItemKind {
 
     // CLI agent only
     RichInput,
+    /// Rewrites the unsent rich input draft into a well-structured prompt.
+    PolishPrompt,
 
     // Both
     FileExplorer,
@@ -93,7 +95,9 @@ impl AgentToolbarItemKind {
             | Self::UsageSummary
             | Self::FastForwardToggle
             | Self::HandoffToCloud => ToolbarAvailability::AgentViewOnly,
-            Self::RichInput | Self::Settings => ToolbarAvailability::CLIAgentOnly,
+            Self::RichInput | Self::PolishPrompt | Self::Settings => {
+                ToolbarAvailability::CLIAgentOnly
+            }
         }
     }
 
@@ -117,6 +121,7 @@ impl AgentToolbarItemKind {
             | Self::ContextWindowUsage
             | Self::UsageSummary
             | Self::RichInput
+            | Self::PolishPrompt
             | Self::VoiceInput => true,
         }
     }
@@ -132,6 +137,7 @@ impl AgentToolbarItemKind {
             Self::UsageSummary => "Conversation Usage",
             Self::FileExplorer => "File Explorer",
             Self::RichInput => "Rich Input",
+            Self::PolishPrompt => "Polish Prompt",
             Self::ShareSession => "/remote-control",
             Self::Settings => "Settings",
             Self::FastForwardToggle => "Fast Forward",
@@ -150,6 +156,7 @@ impl AgentToolbarItemKind {
             Self::UsageSummary => Some(Icon::PieChart),
             Self::FileExplorer => Some(Icon::FileCopy),
             Self::RichInput => Some(Icon::TextInput),
+            Self::PolishPrompt => Some(Icon::Stars),
             Self::ShareSession => Some(Icon::Phone01),
             Self::Settings => Some(Icon::Settings),
             Self::FastForwardToggle => Some(Icon::FastForward),
@@ -176,6 +183,7 @@ impl AgentToolbarItemKind {
             | Self::ShareSession
             | Self::FileExplorer
             | Self::RichInput
+            | Self::PolishPrompt
             | Self::Settings => false,
         }
     }
@@ -303,6 +311,7 @@ impl AgentToolbarItemKind {
         items.push(Self::FileExplorer);
         if FeatureFlag::CLIAgentRichInput.is_enabled() {
             items.push(Self::RichInput);
+            items.push(Self::PolishPrompt);
         }
         items
     }
@@ -325,6 +334,7 @@ impl AgentToolbarItemKind {
         items.extend([
             Self::FileExplorer,
             Self::RichInput,
+            Self::PolishPrompt,
             Self::FileAttach,
             Self::VoiceInput,
             Self::Settings,

@@ -130,6 +130,10 @@ const FAST_FORWARD_OFF_TOOLTIP: &str = "Auto-approve all agent actions for this 
 const FAST_FORWARD_LOCKED_TOOLTIP: &str =
     "Fast forward is always enabled for cloud agent conversations";
 
+const POLISH_PROMPT_LABEL: &str = "Polish prompt";
+const POLISH_PROMPT_TOOLTIP: &str =
+    "Rewrite this prompt with Claude, adding [TODO: …] placeholders for missing details";
+
 const START_REMOTE_CONTROL_TOOLTIP: &str = "Start remote control";
 const START_REMOTE_CONTROL_LOGIN_REQUIRED_TOOLTIP: &str = "Log in to use /remote-control";
 
@@ -229,6 +233,9 @@ pub struct AgentInputFooter {
 
     // CLI agent-specific buttons (rendered when a CLI agent session is active).
     rich_input_button: ViewHandle<ActionButton>,
+    polish_prompt_button: ViewHandle<ActionButton>,
+    /// Set by the terminal view while a polish of the rich input draft is running.
+    prompt_polish_in_progress: bool,
     settings_button: ViewHandle<ActionButton>,
     install_plugin_button: ViewHandle<ActionButton>,
     plugin_instructions_button: ViewHandle<ActionButton>,
@@ -501,6 +508,16 @@ impl AgentInputFooter {
                 .with_compact_keybinding(true)
                 .on_click(|ctx| {
                     ctx.dispatch_typed_action(AgentInputFooterAction::ToggleRichInput);
+                })
+        });
+        let polish_prompt_button = ctx.add_typed_action_view(|_ctx| {
+            ActionButton::new(POLISH_PROMPT_LABEL, AgentInputButtonTheme)
+                .with_icon(Icon::Stars)
+                .with_tooltip(POLISH_PROMPT_TOOLTIP)
+                .with_size(cli_button_size)
+                .with_tooltip_alignment(TooltipAlignment::Left)
+                .on_click(|ctx| {
+                    ctx.dispatch_typed_action(AgentInputFooterAction::PolishPrompt);
                 })
         });
         let settings_button = ctx.add_typed_action_view(|_ctx| {
@@ -971,6 +988,8 @@ impl AgentInputFooter {
             file_button,
             file_explorer_button,
             rich_input_button,
+            polish_prompt_button,
+            prompt_polish_in_progress: false,
             settings_button,
             start_remote_control_button,
             stop_remote_control_button,
@@ -1151,6 +1170,25 @@ impl AgentInputFooter {
                 chip.update_session_context(session_context.clone(), chip_ctx);
             });
         }
+    }
+
+    pub(crate) fn set_prompt_polish_in_progress(
+        &mut self,
+        in_progress: bool,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.prompt_polish_in_progress = in_progress;
+        self.polish_prompt_button.update(ctx, |button, ctx| {
+            button.set_disabled(in_progress, ctx);
+            if in_progress {
+                button.set_label("Polishing…", ctx);
+                button.set_tooltip(Some("Claude is polishing your prompt"), ctx);
+            } else {
+                button.set_label(POLISH_PROMPT_LABEL, ctx);
+                button.set_tooltip(Some(POLISH_PROMPT_TOOLTIP), ctx);
+            }
+        });
+        ctx.notify();
     }
 
     fn has_active_cli_agent_input_session(&self, app: &AppContext) -> bool {
@@ -1601,6 +1639,10 @@ impl AgentInputFooter {
             AgentToolbarItemKind::RichInput => FeatureFlag::CLIAgentRichInput
                 .is_enabled()
                 .then(|| ChildView::new(&self.rich_input_button).finish()),
+            AgentToolbarItemKind::PolishPrompt => (cfg!(not(target_family = "wasm"))
+                && FeatureFlag::CLIAgentRichInput.is_enabled()
+                && self.has_active_cli_agent_input_session(app))
+            .then(|| ChildView::new(&self.polish_prompt_button).finish()),
             AgentToolbarItemKind::FileAttach => Some(ChildView::new(&self.file_button).finish()),
             AgentToolbarItemKind::VoiceInput => {
                 #[cfg(feature = "voice_input")]
@@ -2466,7 +2508,9 @@ impl AgentInputFooter {
                 .is_available(app)
                 .then(|| ChildView::new(&self.file_explorer_button).finish()),
             // Handled by the available_in() guard above; included for exhaustiveness.
-            AgentToolbarItemKind::RichInput | AgentToolbarItemKind::Settings => None,
+            AgentToolbarItemKind::RichInput
+            | AgentToolbarItemKind::PolishPrompt
+            | AgentToolbarItemKind::Settings => None,
         }
     }
 
@@ -2657,6 +2701,7 @@ pub enum AgentInputFooterAction {
     ToggleCodeReview,
     ToggleFileExplorer,
     ToggleRichInput,
+    PolishPrompt,
     ToggleAutodetectionSetting,
     InstallPlugin,
     UpdatePlugin,
@@ -2727,6 +2772,11 @@ impl TypedActionView for AgentInputFooter {
                     ctx.emit(AgentInputFooterEvent::HideRichInput);
                 } else {
                     ctx.emit(AgentInputFooterEvent::OpenRichInput);
+                }
+            }
+            AgentInputFooterAction::PolishPrompt => {
+                if !self.prompt_polish_in_progress {
+                    ctx.emit(AgentInputFooterEvent::PolishRichInputPrompt);
                 }
             }
             AgentInputFooterAction::ToggleAutodetectionSetting => {
@@ -2909,6 +2959,8 @@ pub enum AgentInputFooterEvent {
     StopRemoteControl,
     OpenRichInput,
     HideRichInput,
+    /// Rewrite the unsent CLI agent rich input draft into a well-structured prompt.
+    PolishRichInputPrompt,
     ToggledChipMenu {
         open: bool,
     },
