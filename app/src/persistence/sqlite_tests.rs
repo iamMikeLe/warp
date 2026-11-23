@@ -14,7 +14,8 @@ use warp_graphql::scalars::time::ServerTimestamp;
 use super::{
     app_database_file_path, database_file_path_for_current_scope, database_file_path_for_scope,
     decode_path, deduplicate_events, encode_path, get_all_codebase_index_metadata,
-    read_sqlite_data, save_app_state, save_codebase_index_metadata, setup_database, start_writer,
+    read_saved_app_state, read_sqlite_data, save_app_state, save_codebase_index_metadata,
+    setup_database, start_writer,
 };
 use crate::app_state::{
     AppState, CodePaneSnapShot, CodePaneTabSnapshot, LeafContents, LeafSnapshot, PaneNodeSnapshot,
@@ -1158,4 +1159,66 @@ fn team_member_is_disabled_round_trips_through_sqlite_cache() {
         .expect("disabled member should be present");
     assert!(!active_member.is_disabled);
     assert!(disabled_member.is_disabled);
+}
+
+/// A session saved before the last window closed is read back while the app is running, with its
+/// windows, tabs and active indices intact.
+#[test]
+fn read_saved_app_state_reads_back_the_saved_session() {
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let database_path = tempdir.path().join("warp.sqlite");
+    let mut conn = setup_database(&database_path).expect("database should initialize");
+
+    let mut second_window = test_terminal_window_snapshot(true);
+    let mut second_tab = second_window.tabs[0].clone();
+    if let PaneNodeSnapshot::Leaf(LeafSnapshot {
+        contents: LeafContents::Terminal(terminal),
+        ..
+    }) = &mut second_tab.root
+    {
+        terminal.uuid = vec![42];
+    }
+    second_window.tabs.push(second_tab);
+    second_window.active_tab_index = 1;
+    let app_state = AppState {
+        windows: vec![test_terminal_window_snapshot(false), second_window],
+        active_window_index: Some(1),
+        block_lists: Default::default(),
+        running_mcp_servers: Default::default(),
+    };
+    save_app_state(&mut conn, &app_state).expect("app state should save");
+
+    let restored =
+        read_saved_app_state(database_path.to_str().unwrap()).expect("saved session should load");
+
+    assert_eq!(restored.windows.len(), 2);
+    assert_eq!(restored.active_window_index, Some(1));
+    assert_eq!(restored.windows[1].tabs.len(), 2);
+    assert_eq!(restored.windows[1].active_tab_index, 1);
+    assert!(restored.has_normal_window());
+}
+
+#[test]
+fn read_saved_app_state_of_an_empty_database_has_no_window_to_show() {
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let database_path = tempdir.path().join("warp.sqlite");
+    setup_database(&database_path).expect("database should initialize");
+
+    let restored = read_saved_app_state(database_path.to_str().unwrap())
+        .expect("an empty database should load");
+
+    assert!(restored.windows.is_empty());
+    assert!(!restored.has_normal_window());
+}
+
+#[test]
+fn read_saved_app_state_fails_for_a_corrupted_or_missing_database() {
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let corrupted_path = tempdir.path().join("corrupted.sqlite");
+    std::fs::write(&corrupted_path, b"this is not a sqlite database")
+        .expect("corrupted file should be written");
+    let missing_path = tempdir.path().join("missing.sqlite");
+
+    assert!(read_saved_app_state(corrupted_path.to_str().unwrap()).is_err());
+    assert!(read_saved_app_state(missing_path.to_str().unwrap()).is_err());
 }

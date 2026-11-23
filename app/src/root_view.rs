@@ -19,6 +19,7 @@ use session_sharing_protocol::common::SessionId;
 use settings::Setting as _;
 use url::Url;
 use warp_core::context_flag::ContextFlag;
+use warp_core::execution_mode::AppExecutionMode;
 use warp_core::safe_error;
 use warp_core::user_preferences::GetUserPreferences as _;
 use warp_errors::{report_error, report_if_error};
@@ -96,6 +97,7 @@ use crate::terminal::shell::ShellType;
 use crate::terminal::view::{TerminalAction, cell_size_and_padding};
 use crate::themes::onboarding_theme_picker_themes;
 use crate::themes::theme::{AnsiColorIdentifier, Blend, Fill, ThemeKind, WarpThemeConfig};
+use crate::undo_close::UndoCloseStack;
 use crate::uri::{OpenMCPSettingsArgs, OpenSettingsArgs, url_reports_checkout_success};
 use crate::util::bindings::{self, is_binding_pty_compliant};
 use crate::util::traffic_lights::{TrafficLightData, TrafficLightMouseStates, traffic_light_data};
@@ -320,6 +322,10 @@ pub fn init(app: &mut AppContext) {
 
     app.add_global_action("root_view:open_from_restored", open_from_restored);
     app.add_global_action("root_view:open_new", open_new);
+    app.add_global_action(
+        "root_view:reopen_last_session_or_open_new",
+        reopen_last_session_or_open_new,
+    );
     app.add_global_action("root_view:open_new_with_shell", open_new_with_shell);
     app.add_global_action("root_view:open_new_from_path", |arg, ctx| {
         let _ = open_new_from_path(arg, ctx);
@@ -765,131 +771,90 @@ fn open_from_restored(arg: &OpenFromRestoredArg, ctx: &mut AppContext) {
     if let Some(app_state) = &arg.app_state {
         maybe_register_global_window_shortcuts(global_resource_handles.clone(), ctx);
 
-        let (background_blur_radius_pixels, background_backdrop) = {
-            let window_settings = WindowSettings::as_ref(ctx);
-            (
-                Some(*window_settings.background_blur_radius),
-                *window_settings.background_backdrop,
-            )
-        };
-
         // Check whether user has enabled session restoration.
         if *GeneralSettings::as_ref(ctx).restore_session {
-            let mut active_index = None;
-            let mut normal_window_count = 0;
-            for (idx, window) in app_state.windows.iter().enumerate() {
-                // If this window is a quake window, hide it by default.
-                if window.quake_mode {
-                    // If this is Windows, skip restoring the quake window. Creating a hidden window
-                    // is not supported on Windows. We can't have the quake window visible on
-                    // startup or else it will get mistaken for a normal window.
-                    if cfg!(windows) {
-                        continue;
-                    }
-                    let frame_args = quake_mode_config(
-                        &KeysSettings::as_ref(ctx)
-                            .quake_mode_settings
-                            .value()
-                            .clone(),
-                        ctx,
-                    );
+            open_restored_windows(app_state, global_resource_handles, ctx);
+        }
+    }
+}
 
-                    let (id, _) = ctx.add_window(
-                        AddWindowOptions {
-                            window_style: WindowStyle::Pin,
-                            window_bounds: WindowBounds::ExactPosition(frame_args.window_bounds),
-                            title: Some("Warp".to_owned()),
-                            fullscreen_state: window.fullscreen_state,
-                            background_blur_radius_pixels,
-                            background_backdrop,
-                            // Don't use the quake window for positioning new windows.
-                            anchor_new_windows_from_closed_position:
-                                NextNewWindowsHasThisWindowsBoundsUponClose::No,
-                            on_gpu_driver_selected: on_gpu_driver_selected_callback(),
-                            window_instance: Some(ChannelState::app_id().to_string() + "-hotkey"),
-                        },
-                        |ctx| {
-                            let mut view = RootView::new(
-                                global_resource_handles.clone(),
-                                NewWorkspaceSource::Restored {
-                                    window_snapshot: window.clone(),
-                                    block_lists: app_state.block_lists.clone(),
-                                },
-                                ctx,
-                            );
-                            view.focus(ctx);
-                            view
-                        },
-                    );
-                    ctx.windows().hide_window(id);
+/// Opens a window for each window in `app_state`, creating the active one last so it is focused.
+fn open_restored_windows(
+    app_state: &AppState,
+    global_resource_handles: GlobalResourceHandles,
+    ctx: &mut AppContext,
+) {
+    let (background_blur_radius_pixels, background_backdrop) = {
+        let window_settings = WindowSettings::as_ref(ctx);
+        (
+            Some(*window_settings.background_blur_radius),
+            *window_settings.background_backdrop,
+        )
+    };
 
-                    let mut quake_mode_state = QUAKE_STATE.lock();
-                    *quake_mode_state = Some(QuakeModeState {
-                        window_state: WindowState::Hidden,
-                        window_id: id,
-                        active_display_id: frame_args.display_id,
-                    });
-                } else {
-                    normal_window_count += 1;
-                    if app_state
-                        .active_window_index
-                        .map(|window_idx| window_idx == idx)
-                        .unwrap_or(false)
-                    {
-                        active_index = Some(idx);
-                    } else {
-                        ctx.add_window(
-                            AddWindowOptions {
-                                window_bounds: WindowBounds::new(window.bounds),
-                                title: Some("Warp".to_owned()),
-                                fullscreen_state: window.fullscreen_state,
-                                background_blur_radius_pixels,
-                                background_backdrop,
-                                on_gpu_driver_selected: on_gpu_driver_selected_callback(),
-                                ..Default::default()
-                            },
-                            |ctx| {
-                                let mut view = RootView::new(
-                                    global_resource_handles.clone(),
-                                    NewWorkspaceSource::Restored {
-                                        window_snapshot: window.clone(),
-                                        block_lists: app_state.block_lists.clone(),
-                                    },
-                                    ctx,
-                                );
-                                view.focus(ctx);
-                                view
-                            },
-                        );
-                    }
-                }
+    let mut active_index = None;
+    let mut normal_window_count = 0;
+    for (idx, window) in app_state.windows.iter().enumerate() {
+        // If this window is a quake window, hide it by default.
+        if window.quake_mode {
+            // If this is Windows, skip restoring the quake window. Creating a hidden window
+            // is not supported on Windows. We can't have the quake window visible on
+            // startup or else it will get mistaken for a normal window.
+            if cfg!(windows) {
+                continue;
             }
+            let frame_args = quake_mode_config(
+                &KeysSettings::as_ref(ctx)
+                    .quake_mode_settings
+                    .value()
+                    .clone(),
+                ctx,
+            );
 
-            // If only the quake mode window was restored (which starts hidden), create a new normal
-            // window so that something visible is created on startup.
-            if normal_window_count == 0 {
-                let window_settings = WindowSettings::as_ref(ctx);
-                let options = default_window_options(window_settings, ctx);
-                ctx.add_window(options, |ctx| {
+            let (id, _) = ctx.add_window(
+                AddWindowOptions {
+                    window_style: WindowStyle::Pin,
+                    window_bounds: WindowBounds::ExactPosition(frame_args.window_bounds),
+                    title: Some("Warp".to_owned()),
+                    fullscreen_state: window.fullscreen_state,
+                    background_blur_radius_pixels,
+                    background_backdrop,
+                    // Don't use the quake window for positioning new windows.
+                    anchor_new_windows_from_closed_position:
+                        NextNewWindowsHasThisWindowsBoundsUponClose::No,
+                    on_gpu_driver_selected: on_gpu_driver_selected_callback(),
+                    window_instance: Some(ChannelState::app_id().to_string() + "-hotkey"),
+                },
+                |ctx| {
                     let mut view = RootView::new(
                         global_resource_handles.clone(),
-                        NewWorkspaceSource::Empty {
-                            previous_active_window: None,
-                            shell: None,
+                        NewWorkspaceSource::Restored {
+                            window_snapshot: window.clone(),
+                            block_lists: app_state.block_lists.clone(),
                         },
                         ctx,
                     );
                     view.focus(ctx);
                     view
-                });
-            }
+                },
+            );
+            ctx.windows().hide_window(id);
 
-            // Create the active window last to make sure it is focused on startup.
-            if let Some(idx) = active_index {
-                let window = app_state
-                    .windows
-                    .get(idx)
-                    .expect("Window should exist at idx");
+            let mut quake_mode_state = QUAKE_STATE.lock();
+            *quake_mode_state = Some(QuakeModeState {
+                window_state: WindowState::Hidden,
+                window_id: id,
+                active_display_id: frame_args.display_id,
+            });
+        } else {
+            normal_window_count += 1;
+            if app_state
+                .active_window_index
+                .map(|window_idx| window_idx == idx)
+                .unwrap_or(false)
+            {
+                active_index = Some(idx);
+            } else {
                 ctx.add_window(
                     AddWindowOptions {
                         window_bounds: WindowBounds::new(window.bounds),
@@ -902,7 +867,7 @@ fn open_from_restored(arg: &OpenFromRestoredArg, ctx: &mut AppContext) {
                     },
                     |ctx| {
                         let mut view = RootView::new(
-                            global_resource_handles,
+                            global_resource_handles.clone(),
                             NewWorkspaceSource::Restored {
                                 window_snapshot: window.clone(),
                                 block_lists: app_state.block_lists.clone(),
@@ -915,6 +880,56 @@ fn open_from_restored(arg: &OpenFromRestoredArg, ctx: &mut AppContext) {
                 );
             }
         }
+    }
+
+    // If only the quake mode window was restored (which starts hidden), create a new normal
+    // window so that something visible is created on startup.
+    if normal_window_count == 0 {
+        let window_settings = WindowSettings::as_ref(ctx);
+        let options = default_window_options(window_settings, ctx);
+        ctx.add_window(options, |ctx| {
+            let mut view = RootView::new(
+                global_resource_handles.clone(),
+                NewWorkspaceSource::Empty {
+                    previous_active_window: None,
+                    shell: None,
+                },
+                ctx,
+            );
+            view.focus(ctx);
+            view
+        });
+    }
+
+    // Create the active window last to make sure it is focused on startup.
+    if let Some(idx) = active_index {
+        let window = app_state
+            .windows
+            .get(idx)
+            .expect("Window should exist at idx");
+        ctx.add_window(
+            AddWindowOptions {
+                window_bounds: WindowBounds::new(window.bounds),
+                title: Some("Warp".to_owned()),
+                fullscreen_state: window.fullscreen_state,
+                background_blur_radius_pixels,
+                background_backdrop,
+                on_gpu_driver_selected: on_gpu_driver_selected_callback(),
+                ..Default::default()
+            },
+            |ctx| {
+                let mut view = RootView::new(
+                    global_resource_handles,
+                    NewWorkspaceSource::Restored {
+                        window_snapshot: window.clone(),
+                        block_lists: app_state.block_lists.clone(),
+                    },
+                    ctx,
+                );
+                view.focus(ctx);
+                view
+            },
+        );
     }
 }
 
@@ -1245,6 +1260,80 @@ pub(crate) fn open_new_window_get_handles(
 /// Opens a new window.
 fn open_new(_: &(), ctx: &mut AppContext) {
     open_new_window_get_handles(None, ctx);
+}
+
+/// What a request for a window brings back when no window is open, e.g. a Dock click after the
+/// last window was closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReopenTarget {
+    /// The last closed window, still alive in the undo close stack.
+    ClosedWindow,
+    /// The session saved for restoration, with fresh shells.
+    SavedSession,
+    NewWindow,
+}
+
+fn reopen_target(
+    session_restoration_enabled: bool,
+    has_open_window: bool,
+    closed_window_on_top: bool,
+) -> ReopenTarget {
+    if !session_restoration_enabled || has_open_window {
+        ReopenTarget::NewWindow
+    } else if closed_window_on_top {
+        ReopenTarget::ClosedWindow
+    } else {
+        ReopenTarget::SavedSession
+    }
+}
+
+/// Brings back the last session when the app is asked for a window while none is open, and
+/// opens a new window otherwise.
+fn reopen_last_session_or_open_new(_: &(), ctx: &mut AppContext) {
+    let quake_window_id = quake_mode_window_id();
+    let has_open_window = ctx
+        .window_ids()
+        .any(|window_id| Some(window_id) != quake_window_id);
+    let session_restoration_enabled = AppExecutionMode::as_ref(ctx).can_save_session()
+        && *GeneralSettings::as_ref(ctx).restore_session;
+    let closed_window_on_top = UndoCloseStack::as_ref(ctx).has_closed_window_on_top();
+
+    match reopen_target(
+        session_restoration_enabled,
+        has_open_window,
+        closed_window_on_top,
+    ) {
+        ReopenTarget::ClosedWindow => {
+            UndoCloseStack::handle(ctx).update(ctx, |stack, ctx| stack.undo_close(ctx));
+        }
+        ReopenTarget::SavedSession => match read_saved_session() {
+            Some(app_state) => {
+                let global_resource_handles =
+                    GlobalResourceHandlesProvider::as_ref(ctx).get().clone();
+                open_restored_windows(&app_state, global_resource_handles, ctx);
+            }
+            None => open_new(&(), ctx),
+        },
+        ReopenTarget::NewWindow => open_new(&(), ctx),
+    }
+}
+
+/// The saved session without its quake mode window, if it has a window to show.
+#[cfg(feature = "local_fs")]
+fn read_saved_session() -> Option<AppState> {
+    let database_path = crate::persistence::database_file_path_for_current_scope();
+    match crate::persistence::read_saved_app_state(database_path.to_str()?) {
+        Ok(app_state) => Some(app_state.without_quake_window()).filter(AppState::has_normal_window),
+        Err(err) => {
+            log::warn!("Couldn't read the saved session: {err:#}");
+            None
+        }
+    }
+}
+
+#[cfg(not(feature = "local_fs"))]
+fn read_saved_session() -> Option<AppState> {
+    None
 }
 
 /// Opens a new window with a specific shell

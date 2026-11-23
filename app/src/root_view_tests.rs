@@ -14,9 +14,9 @@ use warpui::{
 
 use super::{
     AccountFirstCompletion, AuthOnboardingState, AuthOnboardingTarget,
-    HAS_COMPLETED_ONBOARDING_KEY, NewWorkspaceSource, RootView, WorkspaceArgs,
+    HAS_COMPLETED_ONBOARDING_KEY, NewWorkspaceSource, ReopenTarget, RootView, WorkspaceArgs,
     has_completed_local_onboarding, offer_variant_for_account_class,
-    refresh_pending_onboarding_choices, requires_post_onboarding_login,
+    refresh_pending_onboarding_choices, reopen_target, requires_post_onboarding_login,
 };
 use crate::GlobalResourceHandles;
 use crate::appearance::Appearance;
@@ -658,4 +658,20 @@ fn onboarding_slides_skip_content_deep_link_terminal() {
             );
         });
     });
+}
+
+#[test]
+fn reopen_target_brings_back_the_last_session_only_when_no_window_is_open() {
+    // Session restoration off: always a new window, as before.
+    assert_eq!(reopen_target(false, false, true), ReopenTarget::NewWindow);
+    assert_eq!(reopen_target(false, false, false), ReopenTarget::NewWindow);
+    // A window is still open (e.g. minimized): a new window, as before.
+    assert_eq!(reopen_target(true, true, true), ReopenTarget::NewWindow);
+    // The closed window is still in the undo stack: reopen it with its live sessions.
+    assert_eq!(reopen_target(true, false, true), ReopenTarget::ClosedWindow);
+    // The undo grace period has passed: restore the saved session.
+    assert_eq!(
+        reopen_target(true, false, false),
+        ReopenTarget::SavedSession
+    );
 }
