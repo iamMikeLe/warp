@@ -161,6 +161,11 @@ fn save_app(_: &(), ctx: &mut AppContext) {
 
     // Only compute the app state if we're definitely going to use it.
     let app_state = get_app_state(ctx);
+    // Closing the last window would otherwise overwrite the saved session with an empty one, so
+    // neither a Dock click nor the next launch could bring those tabs back.
+    if !app_state.has_normal_window() {
+        return;
+    }
     let event = ModelEvent::Snapshot(app_state);
 
     if let Err(err) = model_event_sender.send(event) {

@@ -2964,7 +2964,7 @@ pub(crate) fn app_callbacks(
             // e.g. clicking on the Dock icon. It is NOT called from the New Window
             // menu item.
             App::record_last_active_timestamp();
-            ctx.dispatch_global_action("root_view:open_new", &());
+            ctx.dispatch_global_action("root_view:reopen_last_session_or_open_new", &());
             ctx.dispatch_global_action("workspace:save_app", &());
         })),
         on_open_urls: Some(Box::new(move |urls, ctx| {

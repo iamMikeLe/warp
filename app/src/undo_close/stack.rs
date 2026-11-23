@@ -181,6 +181,13 @@ impl UndoCloseStack {
         self.stack.is_empty()
     }
 
+    /// Whether the next [`Self::undo_close`] reopens a window.
+    pub fn has_closed_window_on_top(&self) -> bool {
+        self.stack
+            .last()
+            .is_some_and(|undo_data| matches!(undo_data.closed_item, ClosedItem::Window(_)))
+    }
+
     /// Returns true only if the pane group is present in the undo close stack as part of a closed tab.
     pub fn is_pane_group_tab_in_stack(&self, pane_group_id: EntityId) -> bool {
         self.stack

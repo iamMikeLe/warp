@@ -32,6 +32,39 @@ pub struct AppState {
     pub running_mcp_servers: Vec<uuid::Uuid>,
 }
 
+impl AppState {
+    /// Whether the session has a window other than the quake mode window, which starts hidden.
+    pub fn has_normal_window(&self) -> bool {
+        self.windows.iter().any(|window| !window.quake_mode)
+    }
+
+    /// Drops the quake mode window, which is already open while the app is running.
+    pub fn without_quake_window(self) -> Self {
+        let active_window_index = self
+            .active_window_index
+            .filter(|&index| {
+                self.windows
+                    .get(index)
+                    .is_some_and(|window| !window.quake_mode)
+            })
+            .map(|index| {
+                self.windows[..index]
+                    .iter()
+                    .filter(|window| !window.quake_mode)
+                    .count()
+            });
+        Self {
+            windows: self
+                .windows
+                .into_iter()
+                .filter(|window| !window.quake_mode)
+                .collect(),
+            active_window_index,
+            ..self
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PaneUuid(pub Vec<u8>);
 
